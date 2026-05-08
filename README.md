@@ -2,6 +2,8 @@
 
 A minimal Windows tray app that toggles groups of background programs on and off via named profiles. Designed for the case where you have 30–40 tray-resident apps (Spotify, Discord, Razer Synapse, OneDrive, AMD Adrenalin, NVIDIA stuff, etc.) and want a "Working" / "Gaming" / "Optimized" / "All off" switcher.
 
+![BgToggle tray menu](docs/screenshot-tray-menu.png)
+
 ## What it does
 
 - Loads a JSON config from `%APPDATA%\BgToggle\config.json` describing apps and profiles.
@@ -60,6 +62,10 @@ dotnet run
 ```
 
 First run creates an empty config at `%APPDATA%\BgToggle\config.json` and loads recipes from `recipes.json` next to the exe. Use **Scan running processes…** to detect known apps and add them to the config; then **Manage profiles…** to define which apps each profile keeps running.
+
+## Contributing recipes
+
+Recipes are the most valuable thing this project can grow. If your favorite tray app isn't covered or has the wrong shutdown strategy on your machine, see [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/RECIPES.md](docs/RECIPES.md). The [issue templates](.github/ISSUE_TEMPLATE/) collect the right info up front.
 
 ## What's still stubbed
 

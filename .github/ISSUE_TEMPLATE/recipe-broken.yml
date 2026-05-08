@@ -1,0 +1,27 @@
+name: Recipe broken / wrong
+description: An existing recipe doesn't work or has the wrong shutdown strategy on your machine
+labels: [recipe, bug]
+body:
+  - type: input
+    id: recipe-id
+    attributes:
+      label: Recipe id
+      placeholder: "razer-synapse"
+    validations: { required: true }
+  - type: input
+    id: app-version
+    attributes:
+      label: App version + Windows version
+      placeholder: "Razer Synapse 3.9.0418, Windows 11 23H2"
+    validations: { required: true }
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected vs. what you got. Paste process list before / after if useful.
+    validations: { required: true }
+  - type: textarea
+    id: side-effects
+    attributes:
+      label: Side effects
+      description: Display flicker, lost browser session, dropped VPN, sync interrupted, anything else.

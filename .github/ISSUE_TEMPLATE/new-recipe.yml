@@ -1,0 +1,49 @@
+name: New recipe request
+description: Request a recipe for an app not yet in recipes.json
+labels: [recipe, enhancement]
+body:
+  - type: input
+    id: app-name
+    attributes:
+      label: App name and version
+      placeholder: "Spotify 1.2.40"
+    validations: { required: true }
+  - type: input
+    id: process-names
+    attributes:
+      label: Process names you see in Task Manager
+      description: Sorted by name. Include helpers (e.g. SpotifyHelper, steamwebhelper).
+      placeholder: "Spotify, SpotifyHelper"
+    validations: { required: true }
+  - type: dropdown
+    id: bucket
+    attributes:
+      label: Which bucket?
+      options:
+        - "graceful (closes on WM_CLOSE)"
+        - "killTree (tray-trap, hides on close)"
+        - "command (vendor CLI: e.g. /shutdown)"
+        - "stopServiceOnly (no UI, just service)"
+        - "stopServiceThenKill (service watchdog respawns UI)"
+        - "not sure"
+    validations: { required: true }
+  - type: input
+    id: shutdown-command
+    attributes:
+      label: Shutdown CLI (if known)
+      placeholder: "/shutdown   or   -shutdown"
+  - type: input
+    id: services
+    attributes:
+      label: Services involved (registry key names, not display names)
+      placeholder: "AGSService, AGMService"
+  - type: input
+    id: services-leave-alone
+    attributes:
+      label: Driver-tied services to LEAVE ALONE
+      placeholder: "NvContainerLocalSystem"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Force-kill side effects, sync interruption, VPN drop, etc.

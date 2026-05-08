@@ -1,0 +1,50 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore BgToggle.csproj
+
+      - name: Build (Release)
+        run: dotnet build BgToggle.csproj --configuration Release --no-restore /warnaserror
+
+      - name: Validate recipes.json parses
+        shell: pwsh
+        run: |
+          $json = Get-Content recipes.json -Raw | ConvertFrom-Json
+          if (-not $json.recipes -or $json.recipes.Count -lt 1) {
+            throw "recipes.json has no recipes"
+          }
+          $allowed = @('graceful','killTree','command','stopServiceOnly','stopServiceThenKill')
+          foreach ($r in $json.recipes) {
+            if (-not $r.id)          { throw "recipe missing id: $($r | ConvertTo-Json -Compress)" }
+            if (-not $r.displayName) { throw "recipe $($r.id) missing displayName" }
+            if (-not $r.processNames -or $r.processNames.Count -lt 1) {
+              throw "recipe $($r.id) missing processNames"
+            }
+            if ($r.shutdown -and $allowed -notcontains $r.shutdown) {
+              throw "recipe $($r.id) has invalid shutdown '$($r.shutdown)'"
+            }
+            if ($r.shutdown -eq 'command' -and -not $r.shutdownCommand) {
+              throw "recipe $($r.id) is 'command' strategy but has no shutdownCommand"
+            }
+            if (($r.shutdown -eq 'stopServiceOnly' -or $r.shutdown -eq 'stopServiceThenKill') -and -not $r.serviceNames) {
+              throw "recipe $($r.id) is service-stop strategy but has no serviceNames"
+            }
+          }
+          Write-Host "OK: $($json.recipes.Count) recipes validated"
