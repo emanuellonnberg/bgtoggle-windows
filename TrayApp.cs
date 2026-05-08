@@ -1,17 +1,22 @@
-using System.Diagnostics;
-
 namespace BgToggle;
 
 public class TrayApp : ApplicationContext
 {
     private readonly NotifyIcon _icon;
     private Config _config;
+    private HotkeyManager _hotkeys;
+    private List<RecipeIssue> _recipeIssues = new();
 
     public TrayApp()
     {
         _config = ConfigStore.Load();
-        // Eager-load recipes so missing recipes.json shows up in Debug early.
-        RecipeStore.Load();
+        var recipes = RecipeStore.Load();
+        _recipeIssues = RecipeValidator.Validate(recipes);
+        if (_recipeIssues.Count > 0)
+        {
+            Logger.Info($"Recipe validator found {_recipeIssues.Count} issue(s):");
+            foreach (var i in _recipeIssues) Logger.Info($"  {i}");
+        }
 
         _icon = new NotifyIcon
         {
@@ -19,7 +24,10 @@ public class TrayApp : ApplicationContext
             Text = "BgToggle",
             Visible = true
         };
+
+        _hotkeys = new HotkeyManager();
         RebuildMenu();
+        RegisterHotkeys();
     }
 
     private void RebuildMenu()
@@ -31,10 +39,10 @@ public class TrayApp : ApplicationContext
             var profilesItem = new ToolStripMenuItem("Profiles");
             foreach (var profile in _config.Profiles)
             {
-                var item = new ToolStripMenuItem(profile.Name)
-                {
-                    Checked = profile.Name == _config.ActiveProfile
-                };
+                var label = string.IsNullOrEmpty(profile.Hotkey)
+                    ? profile.Name
+                    : $"{profile.Name}\t{profile.Hotkey}";
+                var item = new ToolStripMenuItem(label) { Checked = profile.Name == _config.ActiveProfile };
                 var captured = profile;
                 item.Click += (_, _) => ApplyProfile(captured);
                 profilesItem.DropDownItems.Add(item);
@@ -64,13 +72,35 @@ public class TrayApp : ApplicationContext
 
         menu.Items.Add("Scan running processes…", null, (_, _) => RunScanner());
         menu.Items.Add("Manage profiles…", null, (_, _) => ManageProfiles());
+        menu.Items.Add("Manage apps…", null, (_, _) => ManageApps());
+
+        var sysMenu = new ToolStripMenuItem("System");
+        var installAuto = new ToolStripMenuItem(
+            AutostartTask.IsInstalled() ? "Reinstall autostart (admin)…" : "Install autostart (admin)…",
+            null, (_, _) => InstallAutostartTask());
+        var removeAuto = new ToolStripMenuItem("Remove autostart…", null, (_, _) => UninstallAutostartTask())
+        { Enabled = AutostartTask.IsInstalled() };
+        var openLogs = new ToolStripMenuItem("Open logs folder", null, (_, _) => OpenFolder(Logger.LogDir));
+        sysMenu.DropDownItems.Add(installAuto);
+        sysMenu.DropDownItems.Add(removeAuto);
+        sysMenu.DropDownItems.Add(new ToolStripSeparator());
+        sysMenu.DropDownItems.Add(openLogs);
+        menu.Items.Add(sysMenu);
+
+        if (_recipeIssues.Count > 0)
+        {
+            var issuesItem = new ToolStripMenuItem($"Recipe issues: {_recipeIssues.Count}", null,
+                (_, _) => ShowRecipeIssues())
+            { ForeColor = Color.DarkOrange };
+            menu.Items.Add(issuesItem);
+        }
+
         menu.Items.Add("Edit config…", null, (_, _) => OpenConfigInEditor());
         menu.Items.Add("Reload config", null, (_, _) => Reload());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
 
         menu.Opening += (_, _) => RefreshAppCheckmarks(menu);
-
         _icon.ContextMenuStrip = menu;
     }
 
@@ -96,15 +126,45 @@ public class TrayApp : ApplicationContext
         }
     }
 
+    private void RegisterHotkeys()
+    {
+        _hotkeys.UnregisterAll();
+        foreach (var p in _config.Profiles)
+        {
+            if (string.IsNullOrWhiteSpace(p.Hotkey)) continue;
+            var captured = p;
+            _hotkeys.Register(p.Hotkey, () => ApplyProfile(captured));
+        }
+    }
+
     private void ApplyProfile(Profile profile)
     {
+        var diff = ProfileApplier.Diff(profile, _config);
+        var changes = diff.ToStart.Count + diff.ToStop.Count;
+
+        if (_config.ConfirmLargeDiffs && changes >= _config.LargeDiffConfirmThreshold)
+        {
+            var summary = BuildDiffSummary(diff);
+            var ok = MessageBox.Show(
+                $"Applying \"{profile.Name}\" will make {changes} changes:\n\n{summary}\n\nContinue?",
+                "BgToggle — confirm profile apply",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (ok != DialogResult.Yes) return;
+        }
+
         _icon.Text = $"BgToggle — applying {profile.Name}…";
         try
         {
-            ProfileApplier.Apply(profile, _config, msg => Debug.WriteLine(msg));
+            Logger.Info($"Applying profile '{profile.Name}' (start {diff.ToStart.Count}, stop {diff.ToStop.Count})");
+            ProfileApplier.Apply(profile, _config, msg => Logger.Info(msg));
             _config = _config with { ActiveProfile = profile.Name };
             ConfigStore.Save(_config);
             _icon.ShowBalloonTip(2000, "BgToggle", $"Profile applied: {profile.Name}", ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"ApplyProfile '{profile.Name}' threw", ex);
+            _icon.ShowBalloonTip(3000, "BgToggle", $"Apply failed: {ex.Message}", ToolTipIcon.Error);
         }
         finally
         {
@@ -113,10 +173,29 @@ public class TrayApp : ApplicationContext
         }
     }
 
+    private static string BuildDiffSummary(DiffResult diff)
+    {
+        var sb = new System.Text.StringBuilder();
+        if (diff.ToStop.Count > 0)
+        {
+            sb.AppendLine($"Stop ({diff.ToStop.Count}):");
+            foreach (var a in diff.ToStop.Take(10)) sb.AppendLine($"  • {a.DisplayName}");
+            if (diff.ToStop.Count > 10) sb.AppendLine($"  …and {diff.ToStop.Count - 10} more");
+        }
+        if (diff.ToStart.Count > 0)
+        {
+            if (sb.Length > 0) sb.AppendLine();
+            sb.AppendLine($"Start ({diff.ToStart.Count}):");
+            foreach (var a in diff.ToStart.Take(10)) sb.AppendLine($"  • {a.DisplayName}");
+            if (diff.ToStart.Count > 10) sb.AppendLine($"  …and {diff.ToStart.Count - 10} more");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
     private void ToggleApp(ResolvedApp app)
     {
         if (ProcessManager.IsRunning(app.ProcessNames))
-            ProcessManager.Stop(app, msg => Debug.WriteLine(msg));
+            ProcessManager.Stop(app, msg => Logger.Info(msg));
         else
             ProcessManager.Launch(app);
     }
@@ -124,9 +203,7 @@ public class TrayApp : ApplicationContext
     private void RunScanner()
     {
         var existingIds = _config.Apps.Select(a => a.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var matches = RecipeScanner.Scan()
-            .Where(m => !existingIds.Contains(m.Recipe.Id))
-            .ToList();
+        var matches = RecipeScanner.Scan().Where(m => !existingIds.Contains(m.Recipe.Id)).ToList();
 
         if (matches.Count == 0)
         {
@@ -158,25 +235,92 @@ public class TrayApp : ApplicationContext
         if (dlg.ShowDialog() != DialogResult.OK) return;
 
         var newProfiles = dlg.Result.ToList();
-        // If the previously active profile got renamed/deleted, clear ActiveProfile.
         var active = _config.ActiveProfile;
-        if (active is not null && !newProfiles.Any(p => p.Name == active))
-            active = null;
+        if (active is not null && !newProfiles.Any(p => p.Name == active)) active = null;
 
         _config = _config with { Profiles = newProfiles, ActiveProfile = active };
+        ConfigStore.Save(_config);
+        RegisterHotkeys();
+        RebuildMenu();
+    }
+
+    private void ManageApps()
+    {
+        using var dlg = new AppEditor(_config.Apps, RecipeStore.Load());
+        if (dlg.ShowDialog() != DialogResult.OK) return;
+
+        var newApps = dlg.Result.ToList();
+        var newIds = newApps.Select(a => a.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Profiles may reference removed apps — strip dangling ids.
+        var newProfiles = _config.Profiles
+            .Select(p => p with { AppIds = new HashSet<string>(p.AppIds.Where(id => newIds.Contains(id))) })
+            .ToList();
+
+        _config = _config with { Apps = newApps, Profiles = newProfiles };
         ConfigStore.Save(_config);
         RebuildMenu();
     }
 
+    private void InstallAutostartTask()
+    {
+        var exe = Application.ExecutablePath;
+        var ok = AutostartTask.Install(exe);
+        if (ok)
+        {
+            Logger.Info($"Scheduled task installed for {exe}");
+            MessageBox.Show("BgToggle will now start automatically with admin rights at logon.",
+                "BgToggle", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            RebuildMenu();
+        }
+        else
+        {
+            MessageBox.Show("Could not install scheduled task. Did you accept the UAC prompt?",
+                "BgToggle", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void UninstallAutostartTask()
+    {
+        var ok = AutostartTask.Uninstall();
+        if (ok)
+        {
+            Logger.Info("Scheduled task removed");
+            RebuildMenu();
+        }
+        else
+        {
+            MessageBox.Show("Could not remove scheduled task.",
+                "BgToggle", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void ShowRecipeIssues()
+    {
+        var text = string.Join(Environment.NewLine, _recipeIssues.Select(i => i.ToString()));
+        MessageBox.Show(text, "Recipe issues", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private static void OpenFolder(string path)
+    {
+        try
+        {
+            Directory.CreateDirectory(path);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex) { Logger.Error($"OpenFolder({path}) failed", ex); }
+    }
+
     private static void OpenConfigInEditor()
     {
-        Process.Start(new ProcessStartInfo(ConfigStore.ConfigPath) { UseShellExecute = true });
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ConfigStore.ConfigPath) { UseShellExecute = true });
     }
 
     private void Reload()
     {
         _config = ConfigStore.Load();
-        RecipeStore.Load(forceReload: true);
+        var recipes = RecipeStore.Load(forceReload: true);
+        _recipeIssues = RecipeValidator.Validate(recipes);
+        RegisterHotkeys();
         RebuildMenu();
     }
 
@@ -186,6 +330,7 @@ public class TrayApp : ApplicationContext
         var ico = _icon.Icon;
         _icon.Dispose();
         ico?.Dispose();
+        _hotkeys.Dispose();
         base.ExitThreadCore();
     }
 }

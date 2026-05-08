@@ -52,17 +52,21 @@ public record AppDefinition(
 /// <summary>
 /// A profile is a set of app IDs that SHOULD be running. Apps in the config
 /// but not in this set will be stopped when the profile is applied.
+/// Hotkey: optional global shortcut, e.g. "Ctrl+Alt+1", "Win+Shift+G".
 /// </summary>
 public record Profile(
     string Name,
-    HashSet<string> AppIds
+    HashSet<string> AppIds,
+    string? Hotkey = null
 );
 
 /// <summary>Top-level config persisted to JSON.</summary>
 public record Config(
     List<AppDefinition> Apps,
     List<Profile> Profiles,
-    string? ActiveProfile = null
+    string? ActiveProfile = null,
+    int LargeDiffConfirmThreshold = 5,
+    bool ConfirmLargeDiffs = true
 );
 
 public static class AppResolver

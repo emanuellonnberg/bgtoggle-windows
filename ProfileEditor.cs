@@ -12,6 +12,7 @@ public class ProfileEditor : Form
 
     private readonly ListBox _profileList;
     private readonly CheckedListBox _appList;
+    private readonly TextBox _hotkeyBox;
     private readonly Button _newBtn, _renameBtn, _deleteBtn, _saveBtn, _cancelBtn;
     private readonly Label _hint;
 
@@ -23,7 +24,7 @@ public class ProfileEditor : Form
     public ProfileEditor(IEnumerable<Profile> profiles, IEnumerable<AppDefinition> apps)
     {
         // Deep-copy profiles so Cancel really cancels.
-        _profiles = profiles.Select(p => new Profile(p.Name, new HashSet<string>(p.AppIds))).ToList();
+        _profiles = profiles.Select(p => new Profile(p.Name, new HashSet<string>(p.AppIds), p.Hotkey)).ToList();
         _apps = apps.ToList();
 
         Text = "BgToggle — Manage profiles";
@@ -82,7 +83,22 @@ public class ProfileEditor : Form
         foreach (var a in _apps) _appList.Items.Add(a.DisplayName, false);
         _appList.ItemCheck += OnAppItemCheck;
 
+        var hotkeyPanel = new Panel { Dock = DockStyle.Bottom, Height = 36, Padding = new Padding(8, 6, 8, 6) };
+        var hkLabel = new Label { Left = 0, Top = 6, Width = 110, Text = "Global hotkey:" };
+        _hotkeyBox = new TextBox { Left = 110, Top = 4, Width = 200 };
+        var hkHint = new Label { Left = 320, Top = 6, Width = 280, ForeColor = Color.Gray, Text = "e.g. Ctrl+Alt+1, Win+Shift+G" };
+        _hotkeyBox.TextChanged += (_, _) =>
+        {
+            if (_currentIndex < 0) return;
+            var p = _profiles[_currentIndex];
+            _profiles[_currentIndex] = p with { Hotkey = string.IsNullOrWhiteSpace(_hotkeyBox.Text) ? null : _hotkeyBox.Text.Trim() };
+        };
+        hotkeyPanel.Controls.Add(hkLabel);
+        hotkeyPanel.Controls.Add(_hotkeyBox);
+        hotkeyPanel.Controls.Add(hkHint);
+
         split.Panel2.Controls.Add(_appList);
+        split.Panel2.Controls.Add(hotkeyPanel);
         split.Panel2.Controls.Add(_hint);
 
         // --- bottom: save / cancel ---
@@ -129,6 +145,7 @@ public class ProfileEditor : Form
         _suppressItemCheck = true;
         for (int i = 0; i < _apps.Count; i++)
             _appList.SetItemChecked(i, profile.AppIds.Contains(_apps[i].Id));
+        _hotkeyBox.Text = profile.Hotkey ?? "";
         _suppressItemCheck = false;
         _hint.Text = $"Apps to keep running for \"{profile.Name}\":";
     }
@@ -161,7 +178,7 @@ public class ProfileEditor : Form
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        _profiles.Add(new Profile(name, new HashSet<string>()));
+        _profiles.Add(new Profile(name, new HashSet<string>(), null));
         ReloadProfileList(selectIndex: _profiles.Count - 1);
     }
 

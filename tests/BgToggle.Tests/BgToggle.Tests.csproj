@@ -1,28 +1,26 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>BgToggle</RootNamespace>
-    <AssemblyName>BgToggle</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>BgToggle.Tests</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="tests/**" />
-    <None Remove="tests/**" />
-    <Content Remove="tests/**" />
-    <EmbeddedResource Remove="tests/**" />
+    <ProjectReference Include="..\..\BgToggle.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="recipes.json">
+    <None Include="..\..\recipes.json" Link="recipes.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

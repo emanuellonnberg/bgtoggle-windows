@@ -18,10 +18,13 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Restore
-        run: dotnet restore BgToggle.csproj
+        run: dotnet restore app_toggler.sln
 
       - name: Build (Release)
-        run: dotnet build BgToggle.csproj --configuration Release --no-restore /warnaserror
+        run: dotnet build app_toggler.sln --configuration Release --no-restore /warnaserror
+
+      - name: Test
+        run: dotnet test tests/BgToggle.Tests/BgToggle.Tests.csproj --configuration Release --no-build --verbosity normal
 
       - name: Validate recipes.json parses
         shell: pwsh
