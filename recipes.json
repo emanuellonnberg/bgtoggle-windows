@@ -1,0 +1,426 @@
+{
+  "$schema": "https://example.invalid/bgtoggle-recipes.schema.json",
+  "_comment": "Bundled knowledge per app. Paths support %ENVVAR% expansion. Strategy values: graceful, killTree, command, stopServiceOnly, stopServiceThenKill.",
+  "recipes": [
+    {
+      "id": "spotify",
+      "displayName": "Spotify",
+      "processNames": ["Spotify"],
+      "defaultLaunchPath": "%APPDATA%\\Spotify\\Spotify.exe",
+      "shutdown": "killTree",
+      "autostartHints": [{ "method": "registryRunUser", "key": "Spotify" }],
+      "notes": "Spawns helper processes; kill tree to free them."
+    },
+    {
+      "id": "discord",
+      "displayName": "Discord",
+      "processNames": ["Discord"],
+      "defaultLaunchPath": "%LOCALAPPDATA%\\Discord\\Update.exe",
+      "defaultLaunchArgs": "--processStart Discord.exe",
+      "shutdown": "killTree",
+      "autostartHints": [{ "method": "registryRunUser", "key": "Discord" }],
+      "notes": "Traps WM_CLOSE (hides to tray). Must kill."
+    },
+    {
+      "id": "slack",
+      "displayName": "Slack",
+      "processNames": ["slack"],
+      "defaultLaunchPath": "%LOCALAPPDATA%\\slack\\slack.exe",
+      "shutdown": "killTree",
+      "autostartHints": [{ "method": "registryRunUser", "key": "com.squirrel.slack.slack" }],
+      "notes": "Tray-trap. Must kill."
+    },
+    {
+      "id": "teams",
+      "displayName": "Microsoft Teams",
+      "processNames": ["ms-teams", "Teams"],
+      "shutdown": "killTree",
+      "autostartHints": [{ "method": "registryRunUser", "key": "com.squirrel.Teams.Teams" }],
+      "notes": "Tray-trap and multi-process."
+    },
+    {
+      "id": "whatsapp",
+      "displayName": "WhatsApp",
+      "processNames": ["WhatsApp"],
+      "shutdown": "killTree",
+      "notes": "Tray-trap."
+    },
+    {
+      "id": "telegram",
+      "displayName": "Telegram",
+      "processNames": ["Telegram"],
+      "defaultLaunchPath": "%APPDATA%\\Telegram Desktop\\Telegram.exe",
+      "shutdown": "killTree",
+      "autostartHints": [{ "method": "registryRunUser", "key": "Telegram" }],
+      "notes": "Tray-trap."
+    },
+    {
+      "id": "signal",
+      "displayName": "Signal",
+      "processNames": ["Signal"],
+      "defaultLaunchPath": "%LOCALAPPDATA%\\Programs\\signal-desktop\\Signal.exe",
+      "shutdown": "killTree",
+      "autostartHints": [{ "method": "registryRunUser", "key": "Signal" }],
+      "notes": "Tray-trap (Electron)."
+    },
+    {
+      "id": "zoom",
+      "displayName": "Zoom",
+      "processNames": ["Zoom", "ZoomOutlookIMPlugin"],
+      "defaultLaunchPath": "%APPDATA%\\Zoom\\bin\\Zoom.exe",
+      "shutdown": "killTree",
+      "autostartHints": [{ "method": "registryRunUser", "key": "Zoom" }]
+    },
+    {
+      "id": "notion",
+      "displayName": "Notion",
+      "processNames": ["Notion"],
+      "defaultLaunchPath": "%LOCALAPPDATA%\\Programs\\Notion\\Notion.exe",
+      "shutdown": "killTree",
+      "notes": "Electron tray-trap."
+    },
+    {
+      "id": "obsidian",
+      "displayName": "Obsidian",
+      "processNames": ["Obsidian"],
+      "defaultLaunchPath": "%LOCALAPPDATA%\\Obsidian\\Obsidian.exe",
+      "shutdown": "killTree"
+    },
+    {
+      "id": "1password",
+      "displayName": "1Password",
+      "processNames": ["1Password", "1Password-BrowserSupport"],
+      "shutdown": "killTree",
+      "notes": "Browser-extension helper relaunches on next browser start."
+    },
+    {
+      "id": "onedrive",
+      "displayName": "OneDrive",
+      "processNames": ["OneDrive"],
+      "defaultLaunchPath": "%LOCALAPPDATA%\\Microsoft\\OneDrive\\OneDrive.exe",
+      "defaultLaunchArgs": "/background",
+      "shutdown": "command",
+      "shutdownCommand": "/shutdown",
+      "autostartHints": [{ "method": "registryRunUser", "key": "OneDrive" }],
+      "notes": "Use OneDrive.exe /shutdown for sync-aware exit. Force kill can leave files inconsistent."
+    },
+    {
+      "id": "dropbox",
+      "displayName": "Dropbox",
+      "processNames": ["Dropbox"],
+      "defaultLaunchPath": "%APPDATA%\\Dropbox\\bin\\Dropbox.exe",
+      "shutdown": "graceful",
+      "autostartHints": [{ "method": "registryRunUser", "key": "Dropbox" }],
+      "notes": "Honors WM_CLOSE for clean sync exit. Allow ~5s timeout."
+    },
+    {
+      "id": "google-drive",
+      "displayName": "Google Drive",
+      "processNames": ["GoogleDriveFS"],
+      "defaultLaunchPath": "%PROGRAMFILES%\\Google\\Drive File Stream\\launch.bat",
+      "shutdown": "graceful",
+      "notes": "Drive for Desktop. Graceful so it can flush sync."
+    },
+    {
+      "id": "qbittorrent",
+      "displayName": "qBittorrent",
+      "processNames": ["qbittorrent"],
+      "defaultLaunchPath": "%PROGRAMFILES%\\qBittorrent\\qbittorrent.exe",
+      "shutdown": "killTree",
+      "notes": "WM_CLOSE prompts for confirmation; kill tree skips dialog."
+    },
+    {
+      "id": "steam",
+      "displayName": "Steam",
+      "processNames": ["steam", "steamwebhelper"],
+      "defaultLaunchPath": "%PROGRAMFILES(X86)%\\Steam\\steam.exe",
+      "shutdown": "command",
+      "shutdownCommand": "-shutdown",
+      "autostartHints": [{ "method": "registryRunUser", "key": "Steam" }],
+      "notes": "Use steam.exe -shutdown. Force kill can corrupt download manifest."
+    },
+    {
+      "id": "epic-games-launcher",
+      "displayName": "Epic Games Launcher",
+      "processNames": ["EpicGamesLauncher", "EpicWebHelper"],
+      "defaultLaunchPath": "%PROGRAMFILES(X86)%\\Epic Games\\Launcher\\Portal\\Binaries\\Win64\\EpicGamesLauncher.exe",
+      "shutdown": "killTree",
+      "autostartHints": [{ "method": "registryRunUser", "key": "EpicGamesLauncher" }]
+    },
+    {
+      "id": "battle-net",
+      "displayName": "Battle.net",
+      "processNames": ["Battle.net", "Agent", "Battle.net Helper"],
+      "shutdown": "killTree",
+      "notes": "Multi-process; Agent is the updater."
+    },
+    {
+      "id": "ea-app",
+      "displayName": "EA app",
+      "processNames": ["EADesktop", "EALaunchHelper", "EABackgroundService"],
+      "shutdown": "killTree"
+    },
+    {
+      "id": "gog-galaxy",
+      "displayName": "GOG Galaxy",
+      "processNames": ["GalaxyClient", "GalaxyClient Helper", "GalaxyCommunication"],
+      "defaultLaunchPath": "%PROGRAMFILES(X86)%\\GOG Galaxy\\GalaxyClient.exe",
+      "shutdown": "killTree"
+    },
+    {
+      "id": "ubisoft-connect",
+      "displayName": "Ubisoft Connect",
+      "processNames": ["UbisoftConnect", "upc"],
+      "defaultLaunchPath": "%PROGRAMFILES(X86)%\\Ubisoft\\Ubisoft Game Launcher\\UbisoftConnect.exe",
+      "shutdown": "killTree"
+    },
+    {
+      "id": "riot-client",
+      "displayName": "Riot Client",
+      "processNames": ["RiotClientServices", "Riot Client", "RiotClientUx", "RiotClientUxRender"],
+      "shutdown": "killTree",
+      "notes": "Multi-process. Don't run while a Riot game is open."
+    },
+    {
+      "id": "rockstar-launcher",
+      "displayName": "Rockstar Games Launcher",
+      "processNames": ["Launcher", "LauncherPatcher"],
+      "shutdown": "killTree",
+      "notes": "Process is literally named Launcher.exe — risk of name collision; verify before adding."
+    },
+    {
+      "id": "plex-media-server",
+      "displayName": "Plex Media Server",
+      "processNames": ["Plex Media Server", "PlexScriptHost", "Plex Tuner Service"],
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["PlexUpdateService"],
+      "notes": "Server runs as user process by default. Update service is separate."
+    },
+    {
+      "id": "razer-synapse",
+      "displayName": "Razer Synapse",
+      "processNames": ["Razer Synapse 3", "Razer Synapse Service", "RzSDKService"],
+      "defaultLaunchPath": "%PROGRAMFILES(X86)%\\Razer\\Synapse3\\WPFUI\\Framework\\Razer Synapse 3 Host\\Razer Synapse 3.exe",
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["Razer Synapse Service", "Razer Game Manager Service"],
+      "requiresAdmin": true,
+      "autostartHints": [{ "method": "registryRunUser", "key": "Razer Synapse 3" }],
+      "notes": "Tray UI plus services. Killing UI alone leaves services running."
+    },
+    {
+      "id": "razer-cortex",
+      "displayName": "Razer Cortex",
+      "processNames": ["RzCortex", "RazerCortex"],
+      "shutdown": "killTree"
+    },
+    {
+      "id": "logitech-ghub",
+      "displayName": "Logitech G HUB",
+      "processNames": ["lghub", "lghub_agent", "lghub_updater"],
+      "defaultLaunchPath": "%LOCALAPPDATA%\\LGHUB\\lghub.exe",
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["LGHUBUpdaterService"],
+      "requiresAdmin": true,
+      "notes": "Multi-process with updater service watchdog."
+    },
+    {
+      "id": "corsair-icue",
+      "displayName": "Corsair iCUE",
+      "processNames": ["iCUE", "CorsairService"],
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["Corsair Service"],
+      "requiresAdmin": true,
+      "notes": "Service drives RGB; UI alone won't free it."
+    },
+    {
+      "id": "asus-armoury-crate",
+      "displayName": "ASUS Armoury Crate",
+      "processNames": ["ArmouryCrate.Service.exe", "ArmouryCrate.UserSessionHelper", "ArmouryCrate.exe"],
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["ArmouryCrateService", "ArmouryCrateControlInterface"],
+      "servicesToLeaveAlone": ["asComSvc", "atkexComSvc"],
+      "requiresAdmin": true,
+      "notes": "Driver-tied helper services should be left alone."
+    },
+    {
+      "id": "msi-center",
+      "displayName": "MSI Center",
+      "processNames": ["MSI.CentralServer", "MSI.Center.Common.Service.WindowsService"],
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["MSI.CentralServer"],
+      "requiresAdmin": true
+    },
+    {
+      "id": "steelseries-gg",
+      "displayName": "SteelSeries GG",
+      "processNames": ["SteelSeriesGG", "SteelSeriesGGClient"],
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["SteelSeriesGGService"],
+      "requiresAdmin": true
+    },
+    {
+      "id": "adobe-creative-cloud",
+      "displayName": "Adobe Creative Cloud",
+      "processNames": ["Creative Cloud", "Adobe Desktop Service", "CCXProcess", "CCLibrary", "Adobe CEF Helper", "node"],
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["AGSService", "AGMService", "AdobeUpdateService"],
+      "requiresAdmin": true,
+      "autostartHints": [{ "method": "registryRunUser", "key": "Adobe Creative Cloud" }],
+      "notes": "Hostile: Adobe Desktop Service respawns Creative Cloud.exe within seconds. Must stop services."
+    },
+    {
+      "id": "nvidia-overlay",
+      "displayName": "NVIDIA App / GeForce Experience",
+      "processNames": ["NVIDIA app", "NVIDIA Share", "NVIDIA Web Helper", "nvcontainer"],
+      "shutdown": "killTree",
+      "servicesToLeaveAlone": ["NvContainerLocalSystem", "NVDisplay.ContainerLocalSystem"],
+      "notes": "Kill UI/overlay only. Do NOT touch NvContainerLocalSystem — tied to display driver."
+    },
+    {
+      "id": "amd-adrenalin",
+      "displayName": "AMD Adrenalin",
+      "processNames": ["RadeonSoftware", "AMDRSSrcExt", "cncmd"],
+      "shutdown": "killTree",
+      "servicesToLeaveAlone": ["AMD External Events Utility", "AMDRyzenMasterDriverV23"],
+      "notes": "Kill UI only. AMD External Events Utility is driver-tied."
+    },
+    {
+      "id": "intel-arc",
+      "displayName": "Intel Arc Control",
+      "processNames": ["ArcControlAssist", "ArcControl"],
+      "shutdown": "killTree",
+      "servicesToLeaveAlone": ["igccservice", "Intel(R) Graphics Command Center Service"],
+      "notes": "Driver service stays running."
+    },
+    {
+      "id": "powertoys",
+      "displayName": "Microsoft PowerToys",
+      "processNames": ["PowerToys", "PowerToys.PowerLauncher", "PowerToys.FancyZones", "PowerToys.AlwaysOnTop", "PowerToys.AwakeTray", "PowerToys.MouseWithoutBordersHelper"],
+      "shutdown": "killTree",
+      "notes": "Spawns one process per enabled module; kill tree gets them all."
+    },
+    {
+      "id": "sharex",
+      "displayName": "ShareX",
+      "processNames": ["ShareX"],
+      "defaultLaunchPath": "%PROGRAMFILES%\\ShareX\\ShareX.exe",
+      "shutdown": "killTree",
+      "autostartHints": [{ "method": "registryRunUser", "key": "ShareX" }]
+    },
+    {
+      "id": "lightshot",
+      "displayName": "Lightshot",
+      "processNames": ["Lightshot"],
+      "shutdown": "killTree"
+    },
+    {
+      "id": "greenshot",
+      "displayName": "Greenshot",
+      "processNames": ["Greenshot"],
+      "shutdown": "graceful"
+    },
+    {
+      "id": "rainmeter",
+      "displayName": "Rainmeter",
+      "processNames": ["Rainmeter"],
+      "defaultLaunchPath": "%PROGRAMFILES%\\Rainmeter\\Rainmeter.exe",
+      "shutdown": "graceful",
+      "autostartHints": [{ "method": "registryRunUser", "key": "Rainmeter" }]
+    },
+    {
+      "id": "eartrumpet",
+      "displayName": "EarTrumpet",
+      "processNames": ["EarTrumpet"],
+      "shutdown": "killTree",
+      "notes": "Tray-trap."
+    },
+    {
+      "id": "displayfusion",
+      "displayName": "DisplayFusion",
+      "processNames": ["DisplayFusion"],
+      "shutdown": "graceful"
+    },
+    {
+      "id": "flux",
+      "displayName": "f.lux",
+      "processNames": ["flux"],
+      "shutdown": "graceful"
+    },
+    {
+      "id": "anydesk",
+      "displayName": "AnyDesk",
+      "processNames": ["AnyDesk"],
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["AnyDesk"],
+      "requiresAdmin": true,
+      "notes": "Service handles incoming connections; kill UI alone leaves you remotely accessible."
+    },
+    {
+      "id": "teamviewer",
+      "displayName": "TeamViewer",
+      "processNames": ["TeamViewer", "tv_w32", "tv_x64"],
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["TeamViewer"],
+      "requiresAdmin": true
+    },
+    {
+      "id": "nordvpn",
+      "displayName": "NordVPN",
+      "processNames": ["NordVPN", "nordvpn-service"],
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["NordVPN Service"],
+      "requiresAdmin": true,
+      "notes": "Stopping the service drops the VPN tunnel."
+    },
+    {
+      "id": "protonvpn",
+      "displayName": "Proton VPN",
+      "processNames": ["ProtonVPN", "ProtonVPN.WireGuardService"],
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["ProtonVPN Service", "ProtonVPN.WireGuardService"],
+      "requiresAdmin": true,
+      "notes": "Service stop drops tunnel."
+    },
+    {
+      "id": "expressvpn",
+      "displayName": "ExpressVPN",
+      "processNames": ["ExpressVPN", "ExpressVPN.Service", "ExpressVPN.UI"],
+      "shutdown": "stopServiceThenKill",
+      "serviceNames": ["ExpressVPNService"],
+      "requiresAdmin": true
+    },
+    {
+      "id": "parsec",
+      "displayName": "Parsec",
+      "processNames": ["parsecd"],
+      "shutdown": "killTree",
+      "autostartHints": [{ "method": "registryRunUser", "key": "Parsec" }]
+    },
+    {
+      "id": "moonlight",
+      "displayName": "Moonlight",
+      "processNames": ["Moonlight"],
+      "shutdown": "killTree"
+    },
+    {
+      "id": "autohotkey",
+      "displayName": "AutoHotkey",
+      "processNames": ["AutoHotkey", "AutoHotkey64", "AutoHotkey32", "AutoHotkeyU64", "AutoHotkeyU32"],
+      "shutdown": "killTree",
+      "notes": "Each running .ahk script is a separate process."
+    },
+    {
+      "id": "hwinfo",
+      "displayName": "HWiNFO",
+      "processNames": ["HWiNFO64", "HWiNFO32"],
+      "shutdown": "graceful"
+    },
+    {
+      "id": "msi-afterburner",
+      "displayName": "MSI Afterburner",
+      "processNames": ["MSIAfterburner", "RTSS"],
+      "shutdown": "killTree",
+      "notes": "RTSS (RivaTuner Statistics Server) is a separate tray app bundled with Afterburner."
+    }
+  ]
+}

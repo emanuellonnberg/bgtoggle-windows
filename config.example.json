@@ -1,0 +1,63 @@
+{
+  "apps": [
+    {
+      "id": "spotify",
+      "displayName": "Spotify",
+      "exeName": "Spotify",
+      "launchPath": "C:\\Users\\YOUR_USER\\AppData\\Roaming\\Spotify\\Spotify.exe",
+      "killMethod": "graceful",
+      "gracefulTimeoutMs": 3000,
+      "autostart": "registryRunUser",
+      "autostartKey": "Spotify"
+    },
+    {
+      "id": "discord",
+      "displayName": "Discord",
+      "exeName": "Discord",
+      "launchPath": "C:\\Users\\YOUR_USER\\AppData\\Local\\Discord\\Update.exe",
+      "launchArgs": "--processStart Discord.exe",
+      "killMethod": "graceful",
+      "autostart": "registryRunUser",
+      "autostartKey": "Discord"
+    },
+    {
+      "id": "razer-synapse",
+      "displayName": "Razer Synapse",
+      "exeName": "Razer Synapse 3",
+      "launchPath": "C:\\Program Files (x86)\\Razer\\Synapse3\\WPFUI\\Framework\\Razer Synapse 3 Host\\Razer Synapse 3.exe",
+      "killMethod": "force",
+      "autostart": "registryRunUser",
+      "autostartKey": "Razer Synapse 3"
+    },
+    {
+      "id": "onedrive",
+      "displayName": "OneDrive",
+      "exeName": "OneDrive",
+      "launchPath": "C:\\Users\\YOUR_USER\\AppData\\Local\\Microsoft\\OneDrive\\OneDrive.exe",
+      "launchArgs": "/background",
+      "killMethod": "graceful",
+      "gracefulTimeoutMs": 5000,
+      "autostart": "registryRunUser",
+      "autostartKey": "OneDrive"
+    }
+  ],
+  "profiles": [
+    {
+      "name": "All off",
+      "appIds": []
+    },
+    {
+      "name": "Working",
+      "appIds": ["spotify", "discord", "onedrive"]
+    },
+    {
+      "name": "Gaming",
+      "appIds": ["discord", "razer-synapse"]
+    },
+    {
+      "name": "Optimized",
+      "appIds": []
+    }
+  ],
+  "activeProfile": null
+}

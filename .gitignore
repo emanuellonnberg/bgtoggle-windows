@@ -1,0 +1,37 @@
+## .NET / VS / Rider
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+*.suo
+*.userprefs
+*.swp
+*.tmp
+
+## Build outputs
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]uild/
+[Bb]uilds/
+
+## Test results
+TestResults/
+*.coverage
+*.coveragexml
+
+## NuGet
+*.nupkg
+.nuget/
+packages/
+
+## OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+## App-local config (per-machine)
+config.json
+*.local.json
