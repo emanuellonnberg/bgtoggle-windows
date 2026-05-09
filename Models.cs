@@ -60,13 +60,28 @@ public record Profile(
     string? Hotkey = null
 );
 
+/// <summary>
+/// Auto-switch rule. When the named exe starts running, BgToggle applies
+/// the WhileRunningProfile. When it exits, BgToggle either applies
+/// OnExitProfile (if set) or restores the profile that was active before
+/// the trigger fired. Per-trigger restore state is held in TrayApp so
+/// nested triggers (game launcher → game) restore in LIFO order.
+/// </summary>
+public record Trigger(
+    string ExeName,
+    string WhileRunningProfile,
+    string? OnExitProfile = null,
+    bool Enabled = true
+);
+
 /// <summary>Top-level config persisted to JSON.</summary>
 public record Config(
     List<AppDefinition> Apps,
     List<Profile> Profiles,
     string? ActiveProfile = null,
     int LargeDiffConfirmThreshold = 5,
-    bool ConfirmLargeDiffs = true
+    bool ConfirmLargeDiffs = true,
+    List<Trigger>? Triggers = null
 );
 
 public static class AppResolver

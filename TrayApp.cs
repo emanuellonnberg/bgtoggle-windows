@@ -6,6 +6,12 @@ public class TrayApp : ApplicationContext
     private Config _config;
     private HotkeyManager _hotkeys;
     private List<RecipeIssue> _recipeIssues = new();
+    private TriggerWatcher? _triggers;
+    // Per-trigger stash: profile that was active when the trigger fired.
+    // Keyed by Trigger.ExeName so nested triggers (launcher → game) restore
+    // in LIFO order naturally — each one stashes whatever was current.
+    private readonly Dictionary<string, string?> _triggerStash =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public TrayApp()
     {
@@ -28,7 +34,59 @@ public class TrayApp : ApplicationContext
         _hotkeys = new HotkeyManager();
         RebuildMenu();
         RegisterHotkeys();
+        StartTriggerWatcher();
     }
+
+    private void StartTriggerWatcher()
+    {
+        _triggers?.Dispose();
+        _triggers = new TriggerWatcher(
+            triggersProvider: () => (IReadOnlyList<Trigger>)(_config.Triggers ?? new()),
+            isRunning: ProcessManager.IsRunning,
+            onEvent: HandleTriggerEvent
+        );
+        _triggers.Start();
+    }
+
+    private void HandleTriggerEvent(Trigger trigger, TriggerEvent ev)
+    {
+        var targetProfileName = ev == TriggerEvent.Running
+            ? trigger.WhileRunningProfile
+            : trigger.OnExitProfile ?? GetStashedProfile(trigger.ExeName);
+
+        if (string.IsNullOrEmpty(targetProfileName))
+        {
+            Logger.Info($"Trigger '{trigger.ExeName}' {ev}: no target profile (stash empty); skipping");
+            return;
+        }
+        if (string.Equals(targetProfileName, _config.ActiveProfile, StringComparison.Ordinal))
+        {
+            Logger.Info($"Trigger '{trigger.ExeName}' {ev}: target profile '{targetProfileName}' already active; skipping");
+            return;
+        }
+
+        var profile = _config.Profiles.FirstOrDefault(p =>
+            string.Equals(p.Name, targetProfileName, StringComparison.OrdinalIgnoreCase));
+        if (profile is null)
+        {
+            Logger.Warn($"Trigger '{trigger.ExeName}' {ev}: profile '{targetProfileName}' not found");
+            return;
+        }
+
+        if (ev == TriggerEvent.Running)
+            _triggerStash[trigger.ExeName] = _config.ActiveProfile;
+        else
+            _triggerStash.Remove(trigger.ExeName);
+
+        Logger.Info($"Trigger '{trigger.ExeName}' {ev} → applying profile '{profile.Name}'");
+        _icon.ShowBalloonTip(2000, "BgToggle",
+            $"{trigger.ExeName} {(ev == TriggerEvent.Running ? "started" : "exited")} → {profile.Name}",
+            ToolTipIcon.Info);
+        ApplyProfile(profile, isTriggerDriven: true);
+    }
+
+    private string? GetStashedProfile(string exeName) =>
+        _triggerStash.TryGetValue(exeName, out var v) ? v : null;
 
     private void RebuildMenu()
     {
@@ -74,6 +132,7 @@ public class TrayApp : ApplicationContext
         menu.Items.Add("Suggest recipe from running…", null, (_, _) => SuggestRecipe());
         menu.Items.Add("Manage profiles…", null, (_, _) => ManageProfiles());
         menu.Items.Add("Manage apps…", null, (_, _) => ManageApps());
+        menu.Items.Add("Triggers…", null, (_, _) => ManageTriggers());
 
         var sysMenu = new ToolStripMenuItem("System");
         var installAuto = new ToolStripMenuItem(
@@ -138,12 +197,16 @@ public class TrayApp : ApplicationContext
         }
     }
 
-    private void ApplyProfile(Profile profile)
+    private void ApplyProfile(Profile profile) => ApplyProfile(profile, isTriggerDriven: false);
+
+    private void ApplyProfile(Profile profile, bool isTriggerDriven)
     {
         var diff = ProfileApplier.Diff(profile, _config);
         var changes = diff.ToStart.Count + diff.ToStop.Count;
 
-        if (_config.ConfirmLargeDiffs && changes >= _config.LargeDiffConfirmThreshold)
+        // Trigger-driven applies skip the confirm dialog — the user is in a
+        // game and can't see / click a UAC-style prompt under fullscreen.
+        if (!isTriggerDriven && _config.ConfirmLargeDiffs && changes >= _config.LargeDiffConfirmThreshold)
         {
             var summary = BuildDiffSummary(diff);
             var ok = MessageBox.Show(
@@ -284,6 +347,19 @@ public class TrayApp : ApplicationContext
         RebuildMenu();
     }
 
+    private void ManageTriggers()
+    {
+        var existing = _config.Triggers ?? new List<Trigger>();
+        using var dlg = new TriggerEditor(existing, _config.Profiles.Select(p => p.Name));
+        if (dlg.ShowDialog() != DialogResult.OK) return;
+
+        _config = _config with { Triggers = dlg.Result.ToList() };
+        ConfigStore.Save(_config);
+        // Re-prime so newly added triggers don't fire for already-running apps.
+        _triggers?.Prime();
+        Logger.Info($"Saved {_config.Triggers!.Count} trigger(s); re-primed watcher");
+    }
+
     private void InstallAutostartTask()
     {
         var exe = Application.ExecutablePath;
@@ -354,6 +430,7 @@ public class TrayApp : ApplicationContext
         _icon.Dispose();
         ico?.Dispose();
         _hotkeys.Dispose();
+        _triggers?.Dispose();
         base.ExitThreadCore();
     }
 }
