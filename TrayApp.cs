@@ -71,6 +71,7 @@ public class TrayApp : ApplicationContext
         }
 
         menu.Items.Add("Scan running processes…", null, (_, _) => RunScanner());
+        menu.Items.Add("Suggest recipe from running…", null, (_, _) => SuggestRecipe());
         menu.Items.Add("Manage profiles…", null, (_, _) => ManageProfiles());
         menu.Items.Add("Manage apps…", null, (_, _) => ManageApps());
 
@@ -226,6 +227,28 @@ public class TrayApp : ApplicationContext
             ));
         }
         ConfigStore.Save(_config);
+        RebuildMenu();
+    }
+
+    private void SuggestRecipe()
+    {
+        Cursor.Current = Cursors.WaitCursor;
+        List<ProcessCandidate> candidates;
+        try { candidates = ProcessSuggester.Suggest(); }
+        finally { Cursor.Current = Cursors.Default; }
+
+        if (candidates.Count == 0)
+        {
+            MessageBox.Show(
+                "No unmatched user processes found. Either everything running is already covered by a recipe, or all candidates are Windows-internal.",
+                "BgToggle", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dlg = new RecipeSuggestDialog(candidates);
+        dlg.ShowDialog();
+        // After save, force a recipe reload so saved local recipes appear.
+        RecipeStore.Load(forceReload: true);
         RebuildMenu();
     }
 
