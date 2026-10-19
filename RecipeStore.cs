@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -74,7 +73,8 @@ public static class RecipeStore
     {
         if (!File.Exists(path))
         {
-            Debug.WriteLine($"{label} recipes file not found at {path}");
+            // The local file is optional; a missing bundled file is a broken install.
+            if (path == BundledPath) Logger.Warn($"{label} recipes file not found at {path}");
             return new();
         }
         try

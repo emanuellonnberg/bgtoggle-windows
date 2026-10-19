@@ -21,7 +21,7 @@ public static class ProfileApplier
         foreach (var app in config.Apps)
         {
             var resolved = AppResolver.Resolve(app);
-            var shouldRun = target.AppIds.Contains(app.Id);
+            var shouldRun = target.Includes(app.Id);
             var isRunning = ProcessManager.IsRunning(resolved.ProcessNames);
 
             if (shouldRun && !isRunning) toStart.Add(resolved);
@@ -42,16 +42,31 @@ public static class ProfileApplier
         {
             log?.Invoke($"Stopping {app.DisplayName}");
             if (app.Autostart != AutostartMethod.None)
-                AutostartManager.Disable(app);
-            ProcessManager.Stop(app, log);
+                Guard(app, "disable autostart", () => AutostartManager.Disable(app), log);
+            Guard(app, "stop", () => ProcessManager.Stop(app, log), log);
         }
 
         foreach (var app in diff.ToStart)
         {
             log?.Invoke($"Starting {app.DisplayName}");
             if (app.Autostart != AutostartMethod.None)
-                AutostartManager.Enable(app);
-            ProcessManager.Launch(app);
+                Guard(app, "enable autostart", () => AutostartManager.Enable(app), log);
+            Guard(app, "launch", () => ProcessManager.Launch(app), log);
+        }
+    }
+
+    /// <summary>
+    /// One app failing (e.g. an HKLM autostart write while not elevated)
+    /// must not abort the rest of the profile.
+    /// </summary>
+    private static void Guard(ResolvedApp app, string what, Action action, Action<string>? log)
+    {
+        try { action(); }
+        catch (Exception ex)
+        {
+            var msg = $"{app.DisplayName}: {what} failed: {ex.GetType().Name}: {ex.Message}";
+            if (log is not null) log(msg);
+            else Logger.Warn(msg);
         }
     }
 }

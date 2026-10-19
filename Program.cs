@@ -22,6 +22,21 @@ internal static class Program
         Logger.Info($"BgToggle starting (PID {Environment.ProcessId})");
 
         ApplicationConfiguration.Initialize();
+
+        // Exceptions in menu/hotkey/timer handlers land here instead of the
+        // try/catch below. Log them and keep the tray running.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) =>
+        {
+            Logger.Error("Unhandled UI exception", e.Exception);
+            MessageBox.Show($"{e.Exception.Message}\n\nDetails were written to the log:\n{Logger.CurrentLogPath}",
+                "BgToggle — unexpected error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception ex) Logger.Error("Unhandled background exception", ex);
+        };
+
         try
         {
             Application.Run(new TrayApp());

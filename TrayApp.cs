@@ -15,7 +15,7 @@ public class TrayApp : ApplicationContext
 
     public TrayApp()
     {
-        _config = ConfigStore.Load();
+        _config = LoadConfigOrDefault();
         var recipes = RecipeStore.Load();
         _recipeIssues = RecipeValidator.Validate(recipes);
         if (_recipeIssues.Count > 0)
@@ -35,6 +35,30 @@ public class TrayApp : ApplicationContext
         RebuildMenu();
         RegisterHotkeys();
         StartTriggerWatcher();
+    }
+
+    /// <summary>
+    /// A hand-edited config with a typo must not keep the app from starting.
+    /// Back the broken file up first: the next Save overwrites it.
+    /// </summary>
+    private static Config LoadConfigOrDefault()
+    {
+        try
+        {
+            return ConfigStore.Load();
+        }
+        catch (ConfigLoadException ex)
+        {
+            Logger.Error("Config load failed at startup; using defaults", ex);
+            var backup = ConfigStore.BackupBroken(ex.Path);
+            var where = backup is null
+                ? "The broken file could not be backed up and will be overwritten on the next save."
+                : $"The broken file was copied to:\n{backup}";
+            MessageBox.Show(
+                $"{ex.Message}\n\nStarting with an empty default config. {where}",
+                "BgToggle — config error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return ConfigStore.Default();
+        }
     }
 
     private void StartTriggerWatcher()
@@ -411,15 +435,39 @@ public class TrayApp : ApplicationContext
 
     private static void OpenConfigInEditor()
     {
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ConfigStore.ConfigPath) { UseShellExecute = true });
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ConfigStore.ConfigPath) { UseShellExecute = true });
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // No .json file association on this machine.
+            System.Diagnostics.Process.Start("notepad.exe", $"\"{ConfigStore.ConfigPath}\"");
+        }
     }
 
     private void Reload()
     {
-        _config = ConfigStore.Load();
+        Config loaded;
+        try
+        {
+            loaded = ConfigStore.Load();
+        }
+        catch (ConfigLoadException ex)
+        {
+            Logger.Error("Reload failed; keeping current config", ex);
+            MessageBox.Show($"{ex.Message}\n\nFix the file and reload again. The current config stays active.",
+                "BgToggle — config error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        _config = loaded;
         var recipes = RecipeStore.Load(forceReload: true);
         _recipeIssues = RecipeValidator.Validate(recipes);
         RegisterHotkeys();
+        // Re-prime so triggers added or re-enabled in the file don't fire on
+        // the next poll for apps that are simply already running (or not).
+        _triggers?.Prime();
         RebuildMenu();
     }
 

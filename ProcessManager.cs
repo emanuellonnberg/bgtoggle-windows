@@ -35,7 +35,7 @@ public static class ProcessManager
     {
         if (string.IsNullOrWhiteSpace(app.LaunchPath))
         {
-            Debug.WriteLine($"No LaunchPath for {app.DisplayName}; cannot start.");
+            Logger.Warn($"No LaunchPath for {app.DisplayName}; cannot start.");
             return;
         }
 
@@ -48,7 +48,7 @@ public static class ProcessManager
         };
 
         try { Process.Start(psi); }
-        catch (Exception ex) { Debug.WriteLine($"Launch failed for {app.DisplayName}: {ex.Message}"); }
+        catch (Exception ex) { Logger.Error($"Launch failed for {app.DisplayName} ({app.LaunchPath})", ex); }
     }
 
     /// <summary>

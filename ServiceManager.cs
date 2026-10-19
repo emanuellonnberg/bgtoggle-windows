@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.ServiceProcess;
 
 namespace BgToggle;
@@ -40,13 +39,11 @@ public static class ServiceManager
             }
             catch (InvalidOperationException ex) when (ex.InnerException is System.ComponentModel.Win32Exception)
             {
-                Debug.WriteLine($"Service {name} stop failed: {ex.Message}");
-                log?.Invoke($"Service {name} stop failed: {ex.Message} (admin required?)");
+                (log ?? Logger.Warn)($"Service {name} stop failed: {ex.Message} (admin required?)");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Service {name} stop failed: {ex.Message}");
-                log?.Invoke($"Service {name} stop failed: {ex.Message}");
+                (log ?? Logger.Warn)($"Service {name} stop failed: {ex.Message}");
             }
         }
     }
@@ -67,8 +64,7 @@ public static class ServiceManager
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Service {name} start failed: {ex.Message}");
-                log?.Invoke($"Service {name} start failed: {ex.Message}");
+                (log ?? Logger.Warn)($"Service {name} start failed: {ex.Message}");
             }
         }
     }
