@@ -1,0 +1,105 @@
+using System.IO.Pipes;
+
+namespace BgToggle;
+
+public enum HelperStatus { Running, NotInstalled, Incompatible }
+
+public interface IHelperClient
+{
+    /// <summary>Cached; re-probed at most once a minute while not running.</summary>
+    HelperStatus Status { get; }
+
+    /// <summary>Null when the helper is unavailable, incompatible or times out. Never throws.</summary>
+    HelperResponse? Send(string op, string? recipeId);
+}
+
+/// <summary>
+/// Tray side of the helper pipe. Before trusting an answer it checks that
+/// the pipe's server process is the one the service manager reports for the
+/// helper service, so a process squatting on the pipe name is ignored.
+/// </summary>
+public sealed class HelperClient(string pipeName, Func<int?> expectedServerPid, int connectTimeoutMs = 500) : IHelperClient
+{
+    private static readonly TimeSpan ReprobeAfter = TimeSpan.FromSeconds(60);
+    // Service stops wait up to 10 s each; give a multi-service recipe room.
+    private static readonly TimeSpan ResponseTimeout = TimeSpan.FromSeconds(60);
+    // Status is read on the UI thread (menu opening); never wait long there.
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
+
+    private readonly object _gate = new();
+    private volatile HelperStatus _status = HelperStatus.NotInstalled;
+    private DateTime _lastProbeUtc = DateTime.MinValue;
+
+    public HelperStatus Status
+    {
+        get
+        {
+            if (_status != HelperStatus.Running && DateTime.UtcNow - _lastProbeUtc >= ReprobeAfter)
+            {
+                // Don't stall the UI behind a long-running request.
+                if (Monitor.TryEnter(_gate))
+                {
+                    try { Exchange(new HelperRequest(HelperProtocol.Version, HelperProtocol.Ping), ProbeTimeout); }
+                    finally { Monitor.Exit(_gate); }
+                }
+            }
+            return _status;
+        }
+    }
+
+    public HelperResponse? Send(string op, string? recipeId)
+    {
+        if (Status != HelperStatus.Running) return null;
+        lock (_gate) return Exchange(new HelperRequest(HelperProtocol.Version, op, recipeId), ResponseTimeout);
+    }
+
+    private HelperResponse? Exchange(HelperRequest request, TimeSpan responseTimeout)
+    {
+        _lastProbeUtc = DateTime.UtcNow;
+        try
+        {
+            if (expectedServerPid() is not int expected)
+                return Unavailable(null);
+
+            using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            pipe.Connect(connectTimeoutMs);
+
+            if (PipeNative.ServerPid(pipe) != expected)
+                return Unavailable($"pipe '{pipeName}' is served by an unexpected process; ignoring it");
+
+            // Blocking on async pipe I/O ties up no thread-pool thread, and
+            // the wire helpers don't resume on the caller's (UI) context.
+            using var timeout = new CancellationTokenSource(responseTimeout);
+            HelperWire.WriteAsync(pipe, request, timeout.Token).GetAwaiter().GetResult();
+            var response = HelperWire.ReadAsync<HelperResponse>(pipe, timeout.Token).GetAwaiter().GetResult();
+            if (response is null)
+                return Unavailable("helper closed the connection");
+
+            if (response.Protocol != HelperProtocol.Version)
+            {
+                _status = HelperStatus.Incompatible;
+                Logger.Warn($"Helper speaks protocol {response.Protocol}, tray speaks {HelperProtocol.Version}");
+                return null;
+            }
+
+            _status = HelperStatus.Running;
+            return response;
+        }
+        catch (OperationCanceledException)
+        {
+            return Unavailable("helper did not answer in time");
+        }
+        catch (Exception ex) when (ex is TimeoutException or IOException or UnauthorizedAccessException
+                                      or InvalidDataException)
+        {
+            return Unavailable(null);
+        }
+    }
+
+    private HelperResponse? Unavailable(string? warning)
+    {
+        if (warning is not null) Logger.Warn(warning);
+        _status = HelperStatus.NotInstalled;
+        return null;
+    }
+}

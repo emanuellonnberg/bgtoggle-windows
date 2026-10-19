@@ -2,13 +2,6 @@ using System.Diagnostics;
 
 namespace BgToggle;
 
-public static class ExeNames
-{
-    /// <summary>"Foo.exe" → "Foo". Process names never carry the suffix.</summary>
-    public static string Strip(string name) =>
-        name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
-}
-
 /// <summary>
 /// Names of all running processes at one moment. Process.GetProcessesByName
 /// enumerates every process on each call, so checking 30 apps × several

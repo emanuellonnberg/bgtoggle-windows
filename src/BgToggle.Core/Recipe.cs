@@ -18,6 +18,20 @@ public enum ShutdownStrategy
     StopServiceThenKill
 }
 
+/// <summary>
+/// Where an app's autostart entry lives.
+/// </summary>
+public enum AutostartMethod
+{
+    None,
+    /// <summary>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</summary>
+    RegistryRunUser,
+    /// <summary>HKLM\Software\Microsoft\Windows\CurrentVersion\Run (needs admin to write).</summary>
+    RegistryRun,
+    /// <summary>Shortcut/script in the user's Startup folder.</summary>
+    StartupFolder
+}
+
 public record AutostartCandidate(AutostartMethod Method, string Key);
 
 /// <summary>
@@ -38,25 +52,4 @@ public record Recipe(
     AutostartCandidate[]? AutostartHints = null,
     string? Notes = null,
     bool RequiresAdmin = false
-);
-
-/// <summary>
-/// Fully resolved per-app shutdown plan. Combines the user's AppDefinition
-/// (overrides) on top of a Recipe (defaults). Runtime code consumes this.
-/// </summary>
-public record ResolvedApp(
-    string Id,
-    string DisplayName,
-    string[] ProcessNames,
-    string? LaunchPath,
-    string? LaunchArgs,
-    ShutdownStrategy Shutdown,
-    string? ShutdownCommand,
-    string[] ServiceNames,
-    string[] ServicesToLeaveAlone,
-    int GracefulTimeoutMs,
-    AutostartMethod Autostart,
-    string? AutostartKey,
-    bool RequiresAdmin,
-    string? Notes
 );

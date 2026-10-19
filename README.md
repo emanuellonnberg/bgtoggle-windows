@@ -4,6 +4,14 @@ A minimal Windows tray app that toggles groups of background programs on and off
 
 ![BgToggle tray menu](docs/screenshot-tray-menu.png)
 
+## Install
+
+Download `BgToggle-Setup-<version>.exe` from the [latest release](https://github.com/emanuellonnberg/bgtoggle-windows/releases/latest) and run it. It asks for administrator rights once, installs to `C:\Program Files\BgToggle`, and sets up the [helper service](#helper-service). .NET is bundled, so there is nothing else to install.
+
+The installer isn't code-signed yet, so Windows SmartScreen shows "Windows protected your PC" / "Unknown publisher". Choose **More info → Run anyway**.
+
+BgToggle checks GitHub about once a day and shows **Update available** in the tray menu when a newer release exists. It never downloads anything by itself. Set `"checkForUpdates": false` in the config to turn the check off.
+
 ## What it does
 
 - Loads a JSON config from `%APPDATA%\BgToggle\config.json` describing apps and profiles.
@@ -13,7 +21,7 @@ A minimal Windows tray app that toggles groups of background programs on and off
 - For each app you can configure:
   - `killMethod`: `graceful` (WM_CLOSE → wait → force) or `force` (kill tree immediately).
   - `gracefulTimeoutMs`: how long to wait for graceful exit.
-  - `autostart`: `registryRunUser`, `registryRun` (HKLM, needs admin), `startupFolder`, or `none`. When set, disabling the app also disables its autostart so it doesn't come back next boot. Enabling restores the original value from a stash key under `HKCU\Software\BgToggle\Stash`.
+  - `autostart`: `registryRunUser`, `startupFolder`, or `none`. When set, disabling the app also disables its autostart so it doesn't come back next boot. Enabling restores the original value from a stash key under `HKCU\Software\BgToggle\Stash`. (`registryRun`, the machine-wide HKLM key, is no longer managed: BgToggle never runs as administrator, and no bundled recipe needs it.)
 
 ## Recipe-driven shutdowns
 
@@ -31,27 +39,39 @@ A recipe also carries `servicesToLeaveAlone` — driver-tied services we should 
 
 A user's `AppDefinition` becomes a thin reference: `{ "id": "spotify", "displayName": "Spotify", "recipeId": "spotify" }`. The recipe carries the global knowledge; the app definition carries personal config (install path override, which profiles to include in). When recipes update upstream, your config keeps working.
 
+## Helper service
+
+The tray app always runs as you, never as administrator, so every app it starts runs as you too. A few things need admin rights: stopping vendor services such as Razer Synapse, iCUE, G HUB or Adobe Creative Cloud, and ending the elevated processes those vendors run. For those, the installer adds a small Windows service, **BgToggle Helper** (`BgToggleHelper`).
+
+- It only acts on apps listed in the `recipes.json` installed next to it in `Program Files`. Your config and `recipes.local.json` can't widen that list.
+- The tray only asks it about recipe ids. It never sends paths, commands, or service or process names.
+- If a local recipe overrides a bundled one with the same id, the helper isn't used for that app.
+- It only ends processes in your own session, plus the recipe's own service processes.
+- Check it with `sc query BgToggleHelper`, and see its log in `C:\Program Files\BgToggle\logs`. The tray's **System** menu shows *Helper: running / not installed*.
+
+Without the helper (for example `dotnet run` from a clone), everything still works except stopping and starting services, which then fail and are logged. Those apps fall back to being killed.
+
 ## Project layout
 
 ```
 BgToggle/
-├── BgToggle.csproj          .NET 10 + WinForms; ServiceController package
-├── Program.cs               Entry point
-├── TrayApp.cs               NotifyIcon + ContextMenuStrip
-├── IconFactory.cs           Generates the tray icon at runtime (no .ico shipped)
-├── Models.cs                AppDefinition / Profile / Config + AppResolver
-├── Recipes.cs               Recipe / ShutdownStrategy / ResolvedApp records
-├── ConfigStore.cs           JSON load/save for user config
-├── RecipeStore.cs           JSON load + %ENV% expansion for recipes.json
-├── ProcessManager.cs        Find / launch / stop, dispatches on ShutdownStrategy
-├── ServiceManager.cs        Start/stop Windows services (needs admin to actually stop)
-├── AutostartManager.cs      Registry Run + Startup folder, with stash/restore
-├── ProfileApplier.cs        Diff + apply over ResolvedApp
-├── RecipeScanner.cs         Match running processes against bundled recipes
-├── ScanDialog.cs            Checklist UI for adding scanned apps to config
-├── ProfileEditor.cs         Manage profiles UI (create / rename / delete + app checklist)
-├── recipes.json             Bundled recipe library (50+ apps)
-└── config.example.json
+├── BgToggle.csproj              Tray app: .NET 10 + WinForms
+├── Program.cs                   Entry point; installer flags (--first-run, --uninstall-cleanup)
+├── TrayApp.cs                   NotifyIcon + ContextMenuStrip
+├── Models.cs                    AppDefinition / Profile / Config + AppResolver
+├── ResolvedApp.cs               Runtime plan for one app (recipe + overrides)
+├── ConfigStore.cs               JSON load/save for user config
+├── RecipeStore.cs               Bundled + local recipes; which ids are bundled
+├── ProcessManager.cs            Find / launch / stop; uses the helper when it may
+├── AutostartManager.cs          Registry Run + Startup folder, with stash/restore
+├── TrayAutostart.cs             BgToggle's own "start at logon"
+├── UpdateCheck.cs               "Newer release on GitHub?" check
+├── ProfileApplier.cs            Diff + apply over ResolvedApp
+├── recipes.json                 Bundled recipe library (50+ apps)
+├── src/BgToggle.Core/           Shared: recipes, logger, services, helper protocol + pipe
+├── src/BgToggle.Helper/         The BgToggle Helper Windows service
+├── installer/BgToggle.iss       Inno Setup script
+└── tests/BgToggle.Tests/        xUnit tests
 ```
 
 ## Build & run
@@ -61,6 +81,16 @@ dotnet build
 dotnet run
 ```
 
+To build the installer locally (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)):
+
+```
+dotnet publish BgToggle.csproj -c Release -r win-x64 --self-contained -o publish
+dotnet publish src/BgToggle.Helper/BgToggle.Helper.csproj -c Release -r win-x64 --self-contained -o publish
+iscc /DAppVersion=0.0.1 installer\BgToggle.iss
+```
+
+Pushing a tag like `v0.2.0` makes CI build the installer and publish a GitHub release.
+
 First run creates an empty config at `%APPDATA%\BgToggle\config.json` and loads recipes from `recipes.json` next to the exe. Use **Scan running processes…** to detect known apps and add them to the config; then **Manage profiles…** to define which apps each profile keeps running.
 
 ## Contributing recipes
@@ -69,18 +99,12 @@ Recipes are the most valuable thing this project can grow. If your favorite tray
 
 ## What's still stubbed
 
-1. **Hotkeys.** `RegisterHotKey` to bind `Win+Ctrl+1` → "Working", `Win+Ctrl+2` → "Gaming". A hidden message-only window receives `WM_HOTKEY`; a few dozen lines.
-2. **Scheduled tasks autostart.** Not all autostart entries live in Run keys; many tray apps use scheduled tasks. `Microsoft.Win32.TaskScheduler` (NuGet) handles them.
-3. **Elevation handling.** If a service stop or an autostart write needs admin and BgToggle isn't elevated, the operation logs and continues. Real fix: register BgToggle as a scheduled task at logon with "highest privileges" (silent auto-elevate), or split into a tray UI + a small SYSTEM-level helper service speaking over a named pipe. v1 path is the scheduled-task trick.
-4. **Logging.** Errors go to `Debug.WriteLine` and the optional log callback in `ProfileApplier.Apply`. A rolling log file under `%APPDATA%\BgToggle\logs\` would help when something quietly fails.
-5. **Profile transitions.** Switching profiles can stop a lot of apps with no warning. A "confirm before stopping N apps" dialog might be worth it for big diffs.
-6. **Recipe contributions.** `recipes.json` is bundled today. Long term it could ship like uBlock filter lists or winget manifests.
-7. **Logging.** Right now errors go to `Debug.WriteLine`, which is invisible outside a debugger. A rolling log file under `%APPDATA%\BgToggle\logs\` would help when something quietly fails to launch.
-8. **Profile transitions.** If "Working" includes Spotify and "Gaming" doesn't, switching Working → Gaming will stop Spotify. Currently that happens with no warning. A "confirm before stopping N apps" dialog might be worth it for big diffs.
-9. **Better matching.** `ExeName` matching catches all instances by process name. If two managed apps share an exe name (rare but possible), you'd need to disambiguate by full path.
+1. **Scheduled-task autostart.** Not all autostart entries live in Run keys; many tray apps use scheduled tasks. `Microsoft.Win32.TaskScheduler` (NuGet) handles them.
+2. **Recipe distribution.** `recipes.json` ships with each release. Long term it could update separately, like uBlock filter lists or winget manifests.
+3. **Better matching.** `ExeName` matching catches all instances by process name. If two managed apps share an exe name (rare but possible), you'd need to disambiguate by full path.
 
 ## Design notes
 
 - **Profile = set of app IDs that should be running.** Nothing more. The diff is computed from current OS state, not from the previously active profile, so it's robust against the user manually starting/stopping things between profile applies.
 - **We only touch apps that are explicitly in the config.** A profile switch never kills a random `chrome.exe` the user opened. This is by design — the tool is opt-in per app.
-- **Autostart is symmetric.** Disabling an app stashes its autostart value; enabling restores it from the stash. The stash lives in `HKCU\Software\BgToggle\Stash`. If you uninstall BgToggle while apps are "off", their autostart entries are still in the stash and won't fire — worth a cleanup-on-uninstall step eventually.
+- **Autostart is symmetric.** Disabling an app stashes its autostart value; enabling restores it from the stash. The stash lives in `HKCU\Software\BgToggle\Stash`. Uninstalling puts stashed entries back for the account that runs the uninstaller. On a standard (non-admin) account, use **System → Restore all autostart entries** before uninstalling. The uninstaller runs as the admin whose password you type, so it can't reach your entries.

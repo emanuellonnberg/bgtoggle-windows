@@ -11,7 +11,8 @@ public static class Logger
 {
     private static readonly object _gate = new();
 
-    public static string LogDir { get; } = Path.Combine(
+    /// <summary>The helper service runs as SYSTEM and points this at ProgramData.</summary>
+    public static string LogDir { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "BgToggle", "logs");
 

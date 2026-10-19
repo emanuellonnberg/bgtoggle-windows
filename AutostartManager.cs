@@ -38,12 +38,12 @@ public static class AutostartManager
                 StashAndDeleteRun(Registry.CurrentUser, app.AutostartKey);
                 break;
             case AutostartMethod.RegistryRun:
-                StashAndDeleteRun(Registry.LocalMachine, app.AutostartKey);
+                WarnMachineWide(app);
                 break;
             case AutostartMethod.StartupFolder:
                 var path = StartupPath(app.AutostartKey);
                 if (File.Exists(path))
-                    File.Move(path, path + ".bgtoggle.disabled", overwrite: true);
+                    File.Move(path, path + DisabledSuffix, overwrite: true);
                 break;
         }
     }
@@ -58,18 +58,77 @@ public static class AutostartManager
                 RestoreRun(Registry.CurrentUser, app.AutostartKey);
                 break;
             case AutostartMethod.RegistryRun:
-                RestoreRun(Registry.LocalMachine, app.AutostartKey);
+                WarnMachineWide(app);
                 break;
             case AutostartMethod.StartupFolder:
                 var path = StartupPath(app.AutostartKey);
-                var stash = path + ".bgtoggle.disabled";
+                var stash = path + DisabledSuffix;
                 if (File.Exists(stash))
                     File.Move(stash, path, overwrite: true);
                 break;
         }
     }
 
+    /// <summary>
+    /// Put back every autostart entry BgToggle disabled for the current
+    /// user: stashed HKCU Run values and renamed Startup-folder files. Used
+    /// before uninstall and from the tray's System menu.
+    /// </summary>
+    public static int RestoreAllForCurrentUser() =>
+        RestoreAll(Registry.CurrentUser, RunKeyPath, StashKeyPath,
+            Environment.GetFolderPath(Environment.SpecialFolder.Startup));
+
+    /// <summary>Machine-wide leftovers from the old elevated tray; needs admin.</summary>
+    public static int RestoreAllMachineWide() =>
+        RestoreAll(Registry.LocalMachine, RunKeyPath, StashKeyPath, null);
+
+    /// <returns>How many entries were restored.</returns>
+    internal static int RestoreAll(RegistryKey root, string runKeyPath, string stashKeyPath, string? startupDir)
+    {
+        var restored = 0;
+
+        using (var stash = root.OpenSubKey(stashKeyPath, writable: true))
+        {
+            if (stash is not null)
+            {
+                using var run = root.CreateSubKey(runKeyPath);
+                foreach (var name in stash.GetValueNames())
+                {
+                    // Something re-registered itself meanwhile: keep the newer value.
+                    if (run.GetValue(name) is null && stash.GetValue(name) is string value)
+                    {
+                        run.SetValue(name, value);
+                        restored++;
+                    }
+                    stash.DeleteValue(name, throwOnMissingValue: false);
+                }
+            }
+        }
+
+        if (startupDir is not null && Directory.Exists(startupDir))
+        {
+            foreach (var disabled in Directory.EnumerateFiles(startupDir, "*" + DisabledSuffix))
+            {
+                var original = disabled[..^DisabledSuffix.Length];
+                if (File.Exists(original)) continue;
+                File.Move(disabled, original);
+                restored++;
+            }
+        }
+
+        return restored;
+    }
+
+    private const string DisabledSuffix = ".bgtoggle.disabled";
+
     // --- helpers ---
+
+    /// <summary>
+    /// HKLM Run only worked while the whole tray ran elevated. The tray now
+    /// never does, and no bundled recipe needs it, so it is left alone.
+    /// </summary>
+    private static void WarnMachineWide(ResolvedApp app) =>
+        Logger.Warn($"{app.DisplayName}: machine-wide (HKLM) autostart is no longer managed; see README");
 
     private static string? ReadRunValue(RegistryKey root, string name)
     {

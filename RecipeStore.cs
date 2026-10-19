@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace BgToggle;
 
@@ -10,17 +9,12 @@ namespace BgToggle;
 /// Env vars in paths (%LOCALAPPDATA%, %PROGRAMFILES(X86)%, etc.) are
 /// expanded at load time.
 /// </summary>
+/// <param name="BundledIds">Ids whose effective recipe is the bundled one (case-insensitive).</param>
+public record RecipeSet(IReadOnlyList<Recipe> Recipes, IReadOnlySet<string> BundledIds);
+
 public static class RecipeStore
 {
-    public static readonly JsonSerializerOptions Options = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
-    };
+    public static JsonSerializerOptions Options => RecipeFile.Options;
 
     public static string BundledPath { get; } =
         Path.Combine(AppContext.BaseDirectory, "recipes.json");
@@ -32,22 +26,42 @@ public static class RecipeStore
     /// <summary>Backwards-compat alias for tests / older callers.</summary>
     public static string RecipesPath => BundledPath;
 
-    private static IReadOnlyList<Recipe>? _cached;
+    private static RecipeSet? _cached;
 
     public static IReadOnlyList<Recipe> Load(bool forceReload = false)
     {
-        if (_cached is not null && !forceReload) return _cached;
+        if (_cached is not null && !forceReload) return _cached.Recipes;
 
-        var bundled = LoadFile(BundledPath, "bundled");
-        var local = LoadFile(LocalPath, "local");
+        var set = LoadFrom(BundledPath, LocalPath);
+        _cached = set with { Recipes = set.Recipes.Select(ExpandPaths).ToList() };
+        return _cached.Recipes;
+    }
 
-        // Merge: start with bundled, overlay local by id.
+    /// <summary>
+    /// True if the effective recipe for this id came from the bundled file.
+    /// Only those may be handed to the elevated helper, which acts on its
+    /// own installed copy; a local override would make the two disagree.
+    /// </summary>
+    public static bool IsBundled(string recipeId)
+    {
+        Load();
+        return _cached!.BundledIds.Contains(recipeId);
+    }
+
+    /// <summary>Merge bundled and local files by id (local wins). No caching, no env expansion.</summary>
+    public static RecipeSet LoadFrom(string bundledPath, string localPath)
+    {
+        var bundled = LoadFile(bundledPath, "bundled");
+        var local = LoadFile(localPath, "local");
+
         var byId = new Dictionary<string, Recipe>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in bundled) byId[r.Id] = r;
         foreach (var r in local) byId[r.Id] = r;
 
-        _cached = byId.Values.Select(ExpandPaths).ToList();
-        return _cached;
+        var bundledIds = new HashSet<string>(bundled.Select(r => r.Id), StringComparer.OrdinalIgnoreCase);
+        bundledIds.ExceptWith(local.Select(r => r.Id));
+
+        return new RecipeSet(byId.Values.ToList(), bundledIds);
     }
 
     public static Recipe? Find(string id) =>
@@ -63,9 +77,7 @@ public static class RecipeStore
         existing.RemoveAll(r => string.Equals(r.Id, recipe.Id, StringComparison.OrdinalIgnoreCase));
         existing.Add(recipe);
 
-        Directory.CreateDirectory(Path.GetDirectoryName(LocalPath)!);
-        var doc = new RecipesFile(existing);
-        File.WriteAllText(LocalPath, JsonSerializer.Serialize(doc, Options));
+        RecipeFile.Save(LocalPath, existing);
         Logger.Info($"Saved local recipe '{recipe.Id}' to {LocalPath}");
     }
 
@@ -74,14 +86,12 @@ public static class RecipeStore
         if (!File.Exists(path))
         {
             // The local file is optional; a missing bundled file is a broken install.
-            if (path == BundledPath) Logger.Warn($"{label} recipes file not found at {path}");
+            if (label == "bundled") Logger.Warn($"{label} recipes file not found at {path}");
             return new();
         }
         try
         {
-            var json = File.ReadAllText(path);
-            var doc = JsonSerializer.Deserialize<RecipesFile>(json, Options);
-            return doc?.Recipes ?? new();
+            return RecipeFile.Load(path);
         }
         catch (Exception ex)
         {
@@ -100,6 +110,4 @@ public static class RecipeStore
         if (string.IsNullOrEmpty(value)) return value;
         return Environment.ExpandEnvironmentVariables(value);
     }
-
-    private record RecipesFile([property: JsonPropertyName("recipes")] List<Recipe> Recipes);
 }

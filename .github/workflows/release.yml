@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Version from tag
+        shell: bash
+        run: echo "V=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: dotnet test tests/BgToggle.Tests/BgToggle.Tests.csproj --configuration Release
+
+      # Both apps into one folder so they share a single bundled runtime.
+      - name: Publish
+        run: |
+          dotnet publish BgToggle.csproj -c Release -r win-x64 --self-contained -p:Version=$env:V -o publish
+          dotnet publish src/BgToggle.Helper/BgToggle.Helper.csproj -c Release -r win-x64 --self-contained -p:Version=$env:V -o publish
+
+      - name: Build installer
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$env:V installer\BgToggle.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+
+      - name: Check installer size
+        run: |
+          $f = Get-Item "installer/Output/BgToggle-Setup-$env:V.exe"
+          "Installer: {0:N1} MB" -f ($f.Length / 1MB)
+          if ($f.Length -gt 150MB) { throw "Installer is larger than 150 MB" }
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "installer/Output/BgToggle-Setup-$V.exe" --title "BgToggle $V" --generate-notes

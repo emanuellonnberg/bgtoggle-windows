@@ -31,8 +31,13 @@ public class TrayApp : ApplicationContext
             Visible = true
         };
 
+        ProcessManager.Helper = new HelperClient(HelperProtocol.PipeName,
+            () => ServiceManager.ProcessId(HelperProtocol.ServiceName));
+
         _hotkeys = new HotkeyManager();
         RebuildMenu();
+        WarnIfElevated();
+        StartUpdateChecks();
         RegisterHotkeys();
         StartTriggerWatcher();
     }
@@ -59,6 +64,68 @@ public class TrayApp : ApplicationContext
                 "BgToggle — config error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return ConfigStore.Default();
         }
+    }
+
+    /// <summary>
+    /// Anything BgToggle launches inherits its token, so an elevated tray
+    /// starts Spotify & co. as admin. The installer never does this; say so
+    /// if someone ran it that way by hand.
+    /// </summary>
+    private void WarnIfElevated()
+    {
+        if (!Elevation.IsElevated()) return;
+        Logger.Warn("BgToggle is running as administrator; apps it starts will be too");
+        _icon.ShowBalloonTip(5000, "BgToggle",
+            "BgToggle is running as administrator; apps it starts will be too.", ToolTipIcon.Warning);
+    }
+
+    // --- update check ---
+
+    private readonly System.Windows.Forms.Timer _updateTimer = new() { Interval = 30_000 };
+    private LatestRelease? _availableUpdate;
+    private string? _balloonUrl;
+
+    private void StartUpdateChecks()
+    {
+        _icon.BalloonTipClicked += (_, _) => { if (_balloonUrl is { } url) OpenUrl(url); };
+        _icon.BalloonTipClosed += (_, _) => _balloonUrl = null;
+        _updateTimer.Tick += async (_, _) =>
+        {
+            _updateTimer.Interval = 60 * 60 * 1000;   // first tick 30 s after start, then hourly
+            await CheckForUpdateAsync();
+        };
+        _updateTimer.Start();
+    }
+
+    private async Task CheckForUpdateAsync()
+    {
+        var current = typeof(Program).Assembly.GetName().Version ?? new Version(0, 0, 0);
+        if (!_config.CheckForUpdates || UpdateCheck.IsDevBuild(current)) return;
+
+        var state = AppStateStore.Load();
+        if (!UpdateCheck.ShouldCheck(state.LastUpdateCheckUtc, DateTime.UtcNow)) return;
+
+        LatestRelease? latest = null;
+        try { latest = await Task.Run(() => UpdateCheck.FetchLatestAsync(current)); }
+        catch (Exception ex) { Logger.Info($"Update check failed: {ex.GetType().Name}: {ex.Message}"); }
+
+        // Record every attempt, failed or not, so a bad network doesn't mean
+        // hitting GitHub every hour.
+        state = state with { LastUpdateCheckUtc = DateTime.UtcNow };
+        if (latest is not null && UpdateCheck.IsNewer(latest, current))
+        {
+            Logger.Info($"Update available: {latest.TagName}");
+            _availableUpdate = latest;
+            RebuildMenu();
+            if (state.LastNotifiedVersion != latest.TagName)
+            {
+                _balloonUrl = latest.HtmlUrl;
+                _icon.ShowBalloonTip(5000, "BgToggle", $"Version {latest.TagName} is available. Click to open the release page.", ToolTipIcon.Info);
+                state = state with { LastNotifiedVersion = latest.TagName };
+            }
+        }
+        try { AppStateStore.Save(state); }
+        catch (Exception ex) { Logger.Error("Saving app state failed", ex); }
     }
 
     private void StartTriggerWatcher()
@@ -116,6 +183,13 @@ public class TrayApp : ApplicationContext
     {
         var menu = new ContextMenuStrip();
 
+        if (_availableUpdate is { } update)
+        {
+            menu.Items.Add(new ToolStripMenuItem($"Update available: {update.TagName}…", null, (_, _) => OpenUrl(update.HtmlUrl))
+            { Font = new Font(menu.Font, FontStyle.Bold) });
+            menu.Items.Add(new ToolStripSeparator());
+        }
+
         if (_config.Profiles.Count > 0)
         {
             var profilesItem = new ToolStripMenuItem("Profiles");
@@ -141,7 +215,7 @@ public class TrayApp : ApplicationContext
             {
                 var resolved = AppResolver.Resolve(app);
                 var running = ProcessManager.IsRunning(resolved, snapshot);
-                var label = resolved.RequiresAdmin ? $"{app.DisplayName}  (admin)" : app.DisplayName;
+                var label = AppLabel(app.DisplayName, resolved.RequiresAdmin, ProcessManager.Helper?.Status);
                 var item = new ToolStripMenuItem(label) { Checked = running, Tag = app.Id };
                 if (!string.IsNullOrEmpty(resolved.Notes))
                     item.ToolTipText = resolved.Notes;
@@ -160,14 +234,15 @@ public class TrayApp : ApplicationContext
         menu.Items.Add("Triggers…", null, (_, _) => ManageTriggers());
 
         var sysMenu = new ToolStripMenuItem("System");
-        var installAuto = new ToolStripMenuItem(
-            AutostartTask.IsInstalled() ? "Reinstall autostart (admin)…" : "Install autostart (admin)…",
-            null, (_, _) => InstallAutostartTask());
-        var removeAuto = new ToolStripMenuItem("Remove autostart…", null, (_, _) => UninstallAutostartTask())
-        { Enabled = AutostartTask.IsInstalled() };
+        var helperItem = new ToolStripMenuItem(HelperStatusText(), null, (_, _) => OpenUrl(HelperHelpUrl));
+        sysMenu.DropDownItems.Add(helperItem);
+        sysMenu.DropDownItems.Add(new ToolStripSeparator());
+        var startAtLogon = new ToolStripMenuItem("Start BgToggle at logon", null, (_, _) => ToggleStartAtLogon())
+        { Checked = SafeIsStartAtLogon() };
+        var restoreAll = new ToolStripMenuItem("Restore all autostart entries", null, (_, _) => RestoreAllAutostart());
         var openLogs = new ToolStripMenuItem("Open logs folder", null, (_, _) => OpenFolder(Logger.LogDir));
-        sysMenu.DropDownItems.Add(installAuto);
-        sysMenu.DropDownItems.Add(removeAuto);
+        sysMenu.DropDownItems.Add(startAtLogon);
+        sysMenu.DropDownItems.Add(restoreAll);
         sysMenu.DropDownItems.Add(new ToolStripSeparator());
         sysMenu.DropDownItems.Add(openLogs);
         menu.Items.Add(sysMenu);
@@ -185,7 +260,11 @@ public class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
 
-        menu.Opening += (_, _) => RefreshAppCheckmarks(menu);
+        menu.Opening += (_, _) =>
+        {
+            RefreshAppCheckmarks(menu);
+            helperItem.Text = HelperStatusText();
+        };
         _icon.ContextMenuStrip = menu;
     }
 
@@ -445,36 +524,39 @@ public class TrayApp : ApplicationContext
         Logger.Info($"Saved {_config.Triggers!.Count} trigger(s); re-primed watcher");
     }
 
-    private void InstallAutostartTask()
+    private static bool SafeIsStartAtLogon()
     {
-        var exe = Application.ExecutablePath;
-        var ok = AutostartTask.Install(exe);
-        if (ok)
-        {
-            Logger.Info($"Scheduled task installed for {exe}");
-            MessageBox.Show("BgToggle will now start automatically with admin rights at logon.",
-                "BgToggle", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            RebuildMenu();
-        }
-        else
-        {
-            MessageBox.Show("Could not install scheduled task. Did you accept the UAC prompt?",
-                "BgToggle", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
+        try { return TrayAutostart.IsEnabled(); }
+        catch (Exception ex) { Logger.Error("Reading start-at-logon failed", ex); return false; }
     }
 
-    private void UninstallAutostartTask()
+    private void ToggleStartAtLogon()
     {
-        var ok = AutostartTask.Uninstall();
-        if (ok)
+        try
         {
-            Logger.Info("Scheduled task removed");
-            RebuildMenu();
+            var enable = !TrayAutostart.IsEnabled();
+            TrayAutostart.Set(enable, Application.ExecutablePath);
+            Logger.Info($"Start at logon {(enable ? "enabled" : "disabled")}");
         }
-        else
+        catch (Exception ex)
         {
-            MessageBox.Show("Could not remove scheduled task.",
-                "BgToggle", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            Logger.Error("Changing start-at-logon failed", ex);
+        }
+        RebuildMenu();
+    }
+
+    private void RestoreAllAutostart()
+    {
+        try
+        {
+            var n = AutostartManager.RestoreAllForCurrentUser();
+            Logger.Info($"Restored {n} autostart entr{(n == 1 ? "y" : "ies")}");
+            _icon.ShowBalloonTip(2000, "BgToggle", $"Restored {n} autostart entr{(n == 1 ? "y" : "ies")}", ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Restore all autostart entries failed", ex);
+            _icon.ShowBalloonTip(3000, "BgToggle", $"Restore failed: {ex.Message}", ToolTipIcon.Error);
         }
     }
 
@@ -482,6 +564,28 @@ public class TrayApp : ApplicationContext
     {
         var text = string.Join(Environment.NewLine, _recipeIssues.Select(i => i.ToString()));
         MessageBox.Show(text, "Recipe issues", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private const string HelperHelpUrl = "https://github.com/emanuellonnberg/bgtoggle-windows#helper-service";
+
+    /// <summary>
+    /// "(admin)" only matters when nothing can act with admin rights for the
+    /// user; with the helper running it is noise.
+    /// </summary>
+    internal static string AppLabel(string displayName, bool requiresAdmin, HelperStatus? helperStatus) =>
+        requiresAdmin && helperStatus != HelperStatus.Running ? $"{displayName}  (admin)" : displayName;
+
+    private static string HelperStatusText() => ProcessManager.Helper?.Status switch
+    {
+        HelperStatus.Running => "Helper: running",
+        HelperStatus.Incompatible => "Helper: incompatible version (reinstall)",
+        _ => "Helper: not installed"
+    };
+
+    private static void OpenUrl(string url)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex) { Logger.Error($"OpenUrl({url}) failed", ex); }
     }
 
     private static void OpenFolder(string path)
@@ -539,6 +643,7 @@ public class TrayApp : ApplicationContext
         _icon.Dispose();
         ico?.Dispose();
         _hotkeys.Dispose();
+        _updateTimer.Dispose();
         _triggers?.Dispose();
         base.ExitThreadCore();
     }

@@ -1,0 +1,6 @@
+<Project>
+  <!-- Local builds are 0.0.0; release builds pass -p:Version from the git tag. -->
+  <PropertyGroup>
+    <Version>0.0.0</Version>
+  </PropertyGroup>
+</Project>
