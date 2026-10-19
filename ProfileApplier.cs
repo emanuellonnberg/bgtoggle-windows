@@ -22,7 +22,7 @@ public static class ProfileApplier
         {
             var resolved = AppResolver.Resolve(app);
             var shouldRun = target.Includes(app.Id);
-            var isRunning = ProcessManager.IsRunning(resolved.ProcessNames);
+            var isRunning = ProcessManager.IsRunning(resolved);
 
             if (shouldRun && !isRunning) toStart.Add(resolved);
             else if (!shouldRun && isRunning) toStop.Add(resolved);
@@ -51,7 +51,7 @@ public static class ProfileApplier
             log?.Invoke($"Starting {app.DisplayName}");
             if (app.Autostart != AutostartMethod.None)
                 Guard(app, "enable autostart", () => AutostartManager.Enable(app), log);
-            Guard(app, "launch", () => ProcessManager.Launch(app), log);
+            Guard(app, "start", () => ProcessManager.Start(app, log), log);
         }
     }
 

@@ -69,6 +69,22 @@ public static class ServiceManager
         }
     }
 
+    /// <summary>True if installed and running (or on its way there).</summary>
+    public static bool IsRunning(string serviceName)
+    {
+        try
+        {
+            using var sc = new ServiceController(serviceName);
+            return sc.Status is ServiceControllerStatus.Running
+                or ServiceControllerStatus.StartPending
+                or ServiceControllerStatus.ContinuePending;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static bool Exists(string serviceName)
     {
         try

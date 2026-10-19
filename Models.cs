@@ -96,10 +96,11 @@ public static class AppResolver
     /// Combine an AppDefinition with its Recipe (if any) into a runtime plan.
     /// AppDefinition values override recipe values when set.
     /// </summary>
-    public static ResolvedApp Resolve(AppDefinition app)
-    {
-        var recipe = app.RecipeId is null ? null : RecipeStore.Find(app.RecipeId);
+    public static ResolvedApp Resolve(AppDefinition app) =>
+        Resolve(app, app.RecipeId is null ? null : RecipeStore.Find(app.RecipeId));
 
+    public static ResolvedApp Resolve(AppDefinition app, Recipe? recipe)
+    {
         var processNames = recipe?.ProcessNames is { Length: > 0 }
             ? recipe.ProcessNames
             : new[] { StripExe(app.ExeName) };
@@ -115,8 +116,12 @@ public static class AppResolver
                 ? ShutdownStrategy.KillTree
                 : ShutdownStrategy.Graceful);
 
-        var services = recipe?.ServiceNames ?? Array.Empty<string>();
         var leaveAlone = recipe?.ServicesToLeaveAlone ?? Array.Empty<string>();
+        // Leave-alone services are driver-tied; never stop or start them even
+        // if a recipe also lists them by mistake.
+        var services = (recipe?.ServiceNames ?? Array.Empty<string>())
+            .Except(leaveAlone, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
         // Autostart override: if AppDefinition set it, win. Otherwise pick the
         // first recipe hint.

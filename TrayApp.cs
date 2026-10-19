@@ -139,7 +139,7 @@ public class TrayApp : ApplicationContext
             foreach (var app in _config.Apps)
             {
                 var resolved = AppResolver.Resolve(app);
-                var running = ProcessManager.IsRunning(resolved.ProcessNames);
+                var running = ProcessManager.IsRunning(resolved);
                 var label = resolved.RequiresAdmin ? $"{app.DisplayName}  (admin)" : app.DisplayName;
                 var item = new ToolStripMenuItem(label) { Checked = running, Tag = app.Id };
                 if (!string.IsNullOrEmpty(resolved.Notes))
@@ -202,7 +202,7 @@ public class TrayApp : ApplicationContext
                         if (app is not null)
                         {
                             var resolved = AppResolver.Resolve(app);
-                            mi.Checked = ProcessManager.IsRunning(resolved.ProcessNames);
+                            mi.Checked = ProcessManager.IsRunning(resolved);
                         }
                     }
                 }
@@ -282,10 +282,10 @@ public class TrayApp : ApplicationContext
 
     private void ToggleApp(ResolvedApp app)
     {
-        if (ProcessManager.IsRunning(app.ProcessNames))
+        if (ProcessManager.IsRunning(app))
             ProcessManager.Stop(app, msg => Logger.Info(msg));
         else
-            ProcessManager.Launch(app);
+            ProcessManager.Start(app, msg => Logger.Info(msg));
     }
 
     private void RunScanner()

@@ -31,6 +31,33 @@ public static class ProcessManager
     public static bool IsRunning(IEnumerable<string> exeNames) =>
         exeNames.Any(n => FindRunning(n).Count > 0);
 
+    /// <summary>
+    /// Whether the app counts as "on". Service-only apps have no UI process
+    /// to look for, so their service state decides.
+    /// </summary>
+    public static bool IsRunning(ResolvedApp app) =>
+        app.Shutdown == ShutdownStrategy.StopServiceOnly && app.ServiceNames.Length > 0
+            ? app.ServiceNames.Any(ServiceManager.IsRunning)
+            : IsRunning(app.ProcessNames);
+
+    /// <summary>
+    /// Turn an app on: the reverse of <see cref="Stop"/>. Service-stop
+    /// strategies get their services started first, since the UI usually
+    /// needs its watchdog service to work.
+    /// </summary>
+    public static void Start(ResolvedApp app, Action<string>? log = null)
+    {
+        var usesServices = app.Shutdown is ShutdownStrategy.StopServiceOnly or ShutdownStrategy.StopServiceThenKill;
+        if (usesServices && app.ServiceNames.Length > 0)
+            ServiceManager.StartMany(app.ServiceNames, log);
+
+        // Service-only apps normally have nothing to launch.
+        if (app.Shutdown == ShutdownStrategy.StopServiceOnly && string.IsNullOrWhiteSpace(app.LaunchPath))
+            return;
+
+        Launch(app);
+    }
+
     public static void Launch(ResolvedApp app)
     {
         if (string.IsNullOrWhiteSpace(app.LaunchPath))
@@ -117,21 +144,33 @@ public static class ProcessManager
         }
     }
 
+    /// <summary>
+    /// WM_CLOSE to every top-level window of every process, one shared wait,
+    /// then kill whatever is left. If nothing could be asked to close there
+    /// is nothing to wait for, so kill straight away.
+    /// </summary>
     private static void Graceful(ResolvedApp app, Action<string>? log)
     {
+        var posted = 0;
         var procs = FindRunning(app.ProcessNames);
         foreach (var p in procs)
         {
-            try
-            {
-                if (p.MainWindowHandle != IntPtr.Zero)
-                    p.CloseMainWindow();
-                if (!p.WaitForExit(app.GracefulTimeoutMs))
-                    p.Kill(entireProcessTree: true);
-            }
-            catch (Exception ex) { log?.Invoke($"{app.DisplayName} stop failed (PID {p.Id}): {ex.Message}"); }
+            try { posted += WindowCloser.PostClose(p.Id); }
+            catch (Exception ex) { log?.Invoke($"{app.DisplayName} close failed (PID {p.Id}): {ex.Message}"); }
             finally { p.Dispose(); }
         }
+
+        if (posted == 0)
+        {
+            log?.Invoke($"{app.DisplayName}: no windows to close; killing tree");
+        }
+        else
+        {
+            log?.Invoke($"{app.DisplayName}: sent WM_CLOSE to {posted} window(s); waiting up to {app.GracefulTimeoutMs} ms");
+            if (WaitForExit(app, app.GracefulTimeoutMs)) return;
+            log?.Invoke($"{app.DisplayName}: still running after {app.GracefulTimeoutMs} ms; killing tree");
+        }
+        KillTree(app, log);
     }
 
     private static void KillTree(ResolvedApp app, Action<string>? log)
@@ -147,8 +186,8 @@ public static class ProcessManager
 
     private static bool WaitForExit(ResolvedApp app, int timeoutMs)
     {
-        var deadline = Environment.TickCount + timeoutMs;
-        while (Environment.TickCount < deadline)
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
         {
             if (!IsRunning(app.ProcessNames)) return true;
             Thread.Sleep(200);
