@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>BgToggle</RootNamespace>
+    <AssemblyName>BgToggle.Helper</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BgToggle.Core\BgToggle.Core.csproj" />
+  </ItemGroup>
+
+  <!-- The helper trusts only the recipes.json installed next to it. -->
+  <ItemGroup>
+    <None Include="..\..\recipes.json" Link="recipes.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
