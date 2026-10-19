@@ -35,3 +35,17 @@ public sealed class FakeActions : IHelperActions
         Killed.Add(pid);
     }
 }
+
+/// <summary>Stands in for the helper pipe; answers OK while "running".</summary>
+public sealed class FakeHelperClient : IHelperClient
+{
+    public HelperStatus Status { get; set; } = HelperStatus.Running;
+    public List<(string Op, string? RecipeId)> Calls { get; } = new();
+
+    public HelperResponse? Send(string op, string? recipeId)
+    {
+        if (Status != HelperStatus.Running) return null;
+        Calls.Add((op, recipeId));
+        return new HelperResponse(HelperProtocol.Version, true, Log: new() { $"fake {op}" });
+    }
+}

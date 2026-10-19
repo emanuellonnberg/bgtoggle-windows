@@ -31,6 +31,9 @@ public class TrayApp : ApplicationContext
             Visible = true
         };
 
+        ProcessManager.Helper = new HelperClient(HelperProtocol.PipeName,
+            () => ServiceManager.ProcessId(HelperProtocol.ServiceName));
+
         _hotkeys = new HotkeyManager();
         RebuildMenu();
         RegisterHotkeys();
@@ -141,7 +144,7 @@ public class TrayApp : ApplicationContext
             {
                 var resolved = AppResolver.Resolve(app);
                 var running = ProcessManager.IsRunning(resolved, snapshot);
-                var label = resolved.RequiresAdmin ? $"{app.DisplayName}  (admin)" : app.DisplayName;
+                var label = AppLabel(app.DisplayName, resolved.RequiresAdmin, ProcessManager.Helper?.Status);
                 var item = new ToolStripMenuItem(label) { Checked = running, Tag = app.Id };
                 if (!string.IsNullOrEmpty(resolved.Notes))
                     item.ToolTipText = resolved.Notes;
@@ -160,6 +163,9 @@ public class TrayApp : ApplicationContext
         menu.Items.Add("Triggers…", null, (_, _) => ManageTriggers());
 
         var sysMenu = new ToolStripMenuItem("System");
+        var helperItem = new ToolStripMenuItem(HelperStatusText(), null, (_, _) => OpenUrl(HelperHelpUrl));
+        sysMenu.DropDownItems.Add(helperItem);
+        sysMenu.DropDownItems.Add(new ToolStripSeparator());
         var installAuto = new ToolStripMenuItem(
             AutostartTask.IsInstalled() ? "Reinstall autostart (admin)…" : "Install autostart (admin)…",
             null, (_, _) => InstallAutostartTask());
@@ -185,7 +191,11 @@ public class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
 
-        menu.Opening += (_, _) => RefreshAppCheckmarks(menu);
+        menu.Opening += (_, _) =>
+        {
+            RefreshAppCheckmarks(menu);
+            helperItem.Text = HelperStatusText();
+        };
         _icon.ContextMenuStrip = menu;
     }
 
@@ -482,6 +492,28 @@ public class TrayApp : ApplicationContext
     {
         var text = string.Join(Environment.NewLine, _recipeIssues.Select(i => i.ToString()));
         MessageBox.Show(text, "Recipe issues", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private const string HelperHelpUrl = "https://github.com/emanuellonnberg/bgtoggle-windows#helper-service";
+
+    /// <summary>
+    /// "(admin)" only matters when nothing can act with admin rights for the
+    /// user; with the helper running it is noise.
+    /// </summary>
+    internal static string AppLabel(string displayName, bool requiresAdmin, HelperStatus? helperStatus) =>
+        requiresAdmin && helperStatus != HelperStatus.Running ? $"{displayName}  (admin)" : displayName;
+
+    private static string HelperStatusText() => ProcessManager.Helper?.Status switch
+    {
+        HelperStatus.Running => "Helper: running",
+        HelperStatus.Incompatible => "Helper: incompatible version (reinstall)",
+        _ => "Helper: not installed"
+    };
+
+    private static void OpenUrl(string url)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex) { Logger.Error($"OpenUrl({url}) failed", ex); }
     }
 
     private static void OpenFolder(string path)

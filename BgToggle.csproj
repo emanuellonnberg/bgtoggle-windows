@@ -15,6 +15,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="BgToggle.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="tests/**;src/**;installer/**" />
     <None Remove="tests/**;src/**;installer/**" />
     <Content Remove="tests/**;src/**;installer/**" />

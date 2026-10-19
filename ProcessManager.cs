@@ -4,6 +4,12 @@ namespace BgToggle;
 
 public static class ProcessManager
 {
+    /// <summary>
+    /// The elevated helper, set by the tray at startup. Null (or not running)
+    /// means every operation is done locally, as unelevated BgToggle can.
+    /// </summary>
+    public static IHelperClient? Helper { get; set; }
+
     /// <summary>Processes matching the given names. Callers must dispose them.</summary>
     public static IReadOnlyList<Process> FindRunning(IEnumerable<string> exeNames)
     {
@@ -43,7 +49,7 @@ public static class ProcessManager
     public static void Start(ResolvedApp app, Action<string>? log = null)
     {
         var usesServices = app.Shutdown is ShutdownStrategy.StopServiceOnly or ShutdownStrategy.StopServiceThenKill;
-        if (usesServices && app.ServiceNames.Length > 0)
+        if (usesServices && app.ServiceNames.Length > 0 && !TryHelper(app, HelperProtocol.StartServices, log))
             ServiceManager.StartMany(app.ServiceNames, log);
 
         // Service-only apps normally have nothing to launch.
@@ -80,6 +86,16 @@ public static class ProcessManager
     /// </summary>
     public static void Stop(ResolvedApp app, Action<string>? log = null)
     {
+        StopLocally(app, log);
+
+        // Whatever survived (elevated vendor UI, a service host whose stop
+        // timed out) is the helper's job, if it may act for this app.
+        if (CanUseHelper(app) && IsRunning(app))
+            TryHelper(app, HelperProtocol.KillProcesses, log);
+    }
+
+    private static void StopLocally(ResolvedApp app, Action<string>? log)
+    {
         switch (app.Shutdown)
         {
             case ShutdownStrategy.Command:
@@ -92,11 +108,11 @@ public static class ProcessManager
                 break;
 
             case ShutdownStrategy.StopServiceOnly:
-                ServiceManager.StopMany(app.ServiceNames, log);
+                StopServices(app, log);
                 break;
 
             case ShutdownStrategy.StopServiceThenKill:
-                ServiceManager.StopMany(app.ServiceNames, log);
+                StopServices(app, log);
                 KillTree(app, log);
                 break;
 
@@ -109,6 +125,37 @@ public static class ProcessManager
                 Graceful(app, log);
                 break;
         }
+    }
+
+    private static void StopServices(ResolvedApp app, Action<string>? log)
+    {
+        if (!TryHelper(app, HelperProtocol.StopServices, log))
+            ServiceManager.StopMany(app.ServiceNames, log);
+    }
+
+    /// <summary>
+    /// Only apps whose recipe came from the bundled file go to the helper:
+    /// it acts on its own installed copy, keyed by id.
+    /// </summary>
+    private static bool CanUseHelper(ResolvedApp app) =>
+        app.HelperEligible && app.RecipeId is not null && Helper?.Status == HelperStatus.Running;
+
+    /// <summary>True if the helper did it; false means do it locally (or give up).</summary>
+    private static bool TryHelper(ResolvedApp app, string op, Action<string>? log)
+    {
+        if (!CanUseHelper(app)) return false;
+
+        var response = Helper!.Send(op, app.RecipeId);
+        if (response is null)
+        {
+            log?.Invoke($"{app.DisplayName}: helper unavailable for {op}; trying locally");
+            return false;
+        }
+        foreach (var line in response.Log ?? new())
+            log?.Invoke($"{app.DisplayName} (helper): {line}");
+        if (!response.Ok)
+            log?.Invoke($"{app.DisplayName}: helper refused {op}: {response.Error}");
+        return response.Ok;
     }
 
     private static void StopViaCommand(ResolvedApp app, Action<string>? log)

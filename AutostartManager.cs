@@ -38,7 +38,7 @@ public static class AutostartManager
                 StashAndDeleteRun(Registry.CurrentUser, app.AutostartKey);
                 break;
             case AutostartMethod.RegistryRun:
-                StashAndDeleteRun(Registry.LocalMachine, app.AutostartKey);
+                WarnMachineWide(app);
                 break;
             case AutostartMethod.StartupFolder:
                 var path = StartupPath(app.AutostartKey);
@@ -58,7 +58,7 @@ public static class AutostartManager
                 RestoreRun(Registry.CurrentUser, app.AutostartKey);
                 break;
             case AutostartMethod.RegistryRun:
-                RestoreRun(Registry.LocalMachine, app.AutostartKey);
+                WarnMachineWide(app);
                 break;
             case AutostartMethod.StartupFolder:
                 var path = StartupPath(app.AutostartKey);
@@ -70,6 +70,13 @@ public static class AutostartManager
     }
 
     // --- helpers ---
+
+    /// <summary>
+    /// HKLM Run only worked while the whole tray ran elevated. The tray now
+    /// never does, and no bundled recipe needs it, so it is left alone.
+    /// </summary>
+    private static void WarnMachineWide(ResolvedApp app) =>
+        Logger.Warn($"{app.DisplayName}: machine-wide (HKLM) autostart is no longer managed; see README");
 
     private static string? ReadRunValue(RegistryKey root, string name)
     {
