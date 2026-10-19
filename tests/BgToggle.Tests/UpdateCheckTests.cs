@@ -31,6 +31,8 @@ public class UpdateCheckTests
         Assert.Null(UpdateCheck.ParseTag("v0.3.0-beta"));
         Assert.Null(UpdateCheck.ParseTag("release-1"));
         Assert.Null(UpdateCheck.ParseTag(""));
+        Assert.Null(UpdateCheck.ParseTag("v1.2.99999999999"));        // overflows int
+        Assert.Null(UpdateCheck.ParseTag("v\u0661.\u0662.\u0663"));  // non-ASCII digits
     }
 
     [Fact]

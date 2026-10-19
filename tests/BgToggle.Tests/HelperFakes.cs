@@ -6,6 +6,7 @@ public sealed class FakeActions : IHelperActions
     public List<string> Stopped { get; } = new();
     public List<string> Started { get; } = new();
     public List<int> Killed { get; } = new();
+    public Dictionary<int, bool> KilledTree { get; } = new();
     public List<RunningProcess> Processes { get; } = new();
     public Dictionary<string, int> ServicePids { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<int> FailKill { get; } = new();
@@ -29,10 +30,11 @@ public sealed class FakeActions : IHelperActions
 
     public IReadOnlyList<RunningProcess> AllProcesses() => Processes;
 
-    public void KillTree(int pid)
+    public void Kill(RunningProcess target, bool entireTree)
     {
-        if (FailKill.Contains(pid)) throw new InvalidOperationException("process has exited");
-        Killed.Add(pid);
+        if (FailKill.Contains(target.Pid)) throw new InvalidOperationException("process has exited");
+        Killed.Add(target.Pid);
+        KilledTree[target.Pid] = entireTree;
     }
 }
 

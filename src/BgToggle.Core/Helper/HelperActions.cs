@@ -23,10 +23,20 @@ public sealed class SystemHelperActions : IHelperActions
         return list;
     }
 
-    public void KillTree(int pid)
+    /// <summary>
+    /// The target was picked from an earlier snapshot. Re-check name and
+    /// session on the opened process first, so a PID reused in between is
+    /// never killed as SYSTEM.
+    /// </summary>
+    public void Kill(RunningProcess target, bool entireTree)
     {
-        using var p = Process.GetProcessById(pid);
-        p.Kill(entireProcessTree: true);
+        using var p = Process.GetProcessById(target.Pid);
+        if (!string.Equals(ExeNames.Strip(p.ProcessName), ExeNames.Strip(target.Name), StringComparison.OrdinalIgnoreCase)
+            || p.SessionId != target.SessionId)
+        {
+            throw new InvalidOperationException($"PID {target.Pid} is no longer {target.Name} in session {target.SessionId}");
+        }
+        p.Kill(entireTree);
     }
 }
 
@@ -38,5 +48,5 @@ public interface IHelperActions
     int? ServiceProcessId(string serviceName);
     IReadOnlyList<RunningProcess> AllProcesses();
     /// <summary>May throw (e.g. the process already exited).</summary>
-    void KillTree(int pid);
+    void Kill(RunningProcess target, bool entireTree);
 }

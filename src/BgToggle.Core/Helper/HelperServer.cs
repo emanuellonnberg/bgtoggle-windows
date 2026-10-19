@@ -11,11 +11,18 @@ namespace BgToggle;
 public sealed class HelperServer
 {
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(5);
+    // Bounds threads and pipe instances a local user can pin at once.
+    private const int MaxConcurrentConnections = 16;
 
     private readonly string _pipeName;
     private readonly PipeSecurity? _security;
     private readonly Func<HelperRequest, int, HelperResponse> _handle;
     private readonly object _handleGate = new();
+    private int _activeConnections;
+    private readonly SemaphoreSlim _slots = new(MaxConcurrentConnections);
+
+    /// <summary>Connections currently being served (test hook).</summary>
+    internal int ActiveConnections => Volatile.Read(ref _activeConnections);
 
     private readonly string? _recipesPath;
     private readonly IHelperActions? _actions;
@@ -53,38 +60,68 @@ public sealed class HelperServer
         var first = true;
         while (!ct.IsCancellationRequested)
         {
-            NamedPipeServerStream server;
+            try
+            {
+                await _slots.WaitAsync(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            NamedPipeServerStream? server = null;
             try
             {
                 // FirstPipeInstance on the first instance makes creation fail
                 // if someone else already owns the name (pipe squatting).
+                // Non-zero buffers: replies never block on a client that
+                // doesn't read them.
                 var options = PipeOptions.Asynchronous | (first ? PipeOptions.FirstPipeInstance : PipeOptions.None);
                 server = NamedPipeServerStreamAcl.Create(_pipeName, PipeDirection.InOut,
-                    NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte, options, 0, 0, _security);
+                    NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte, options,
+                    HelperProtocol.MaxMessageBytes, HelperProtocol.MaxMessageBytes, _security);
                 first = false;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                Logger.Error($"Could not create pipe '{_pipeName}'", ex);
-                try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { break; }
-                continue;
-            }
 
-            try
-            {
                 await server.WaitForConnectionAsync(ct);
             }
             catch (OperationCanceledException)
             {
-                server.Dispose();
+                server?.Dispose();
+                _slots.Release();
                 break;
             }
+            catch (Exception ex)
+            {
+                // E.g. a client that connected and closed before the wait
+                // completed ("pipe is being closed"). Never let the loop die:
+                // the service would stay RUNNING with nobody listening.
+                server?.Dispose();
+                _slots.Release();
+                if (server is null)
+                {
+                    Logger.Error($"Could not create pipe '{_pipeName}'", ex);
+                    try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { break; }
+                }
+                continue;
+            }
 
-            _ = Task.Run(() => Serve(server));
+            var connected = server;
+            _ = Task.Run(() => Serve(connected));
         }
     }
 
     private void Serve(NamedPipeServerStream server)
+    {
+        Interlocked.Increment(ref _activeConnections);
+        try { ServeCore(server); }
+        finally
+        {
+            Interlocked.Decrement(ref _activeConnections);
+            _slots.Release();
+        }
+    }
+
+    private void ServeCore(NamedPipeServerStream server)
     {
         using (server)
         {
@@ -135,6 +172,7 @@ public sealed class HelperServer
         _recipesStamp = stamp;
 
         var allow = HelperAllowList.Empty;
+        string? error = null;
         try
         {
             allow = new HelperAllowList(RecipeFile.Load(_recipesPath!));
@@ -142,8 +180,9 @@ public sealed class HelperServer
         }
         catch (Exception ex)
         {
+            error = $"installed recipes.json could not be loaded ({ex.GetType().Name}); reinstall BgToggle";
             Logger.Error($"Helper could not load recipes from {_recipesPath}; refusing recipe operations", ex);
         }
-        _handler = new HelperRequestHandler(allow, _actions!, _appVersion);
+        _handler = new HelperRequestHandler(allow, _actions!, _appVersion, error);
     }
 }

@@ -47,7 +47,7 @@ The tray app always runs as you, never as administrator, so every app it starts 
 - The tray only asks it about recipe ids. It never sends paths, commands, or service or process names.
 - If a local recipe overrides a bundled one with the same id, the helper isn't used for that app.
 - It only ends processes in your own session, plus the recipe's own service processes.
-- Check it with `sc query BgToggleHelper`, and see its log in `%ProgramData%\BgToggle\logs`. The tray's **System** menu shows *Helper: running / not installed*.
+- Check it with `sc query BgToggleHelper`, and see its log in `C:\Program Files\BgToggle\logs`. The tray's **System** menu shows *Helper: running / not installed*.
 
 Without the helper (for example `dotnet run` from a clone), everything still works except stopping and starting services, which then fail and are logged. Those apps fall back to being killed.
 

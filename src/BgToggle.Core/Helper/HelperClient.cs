@@ -23,6 +23,8 @@ public sealed class HelperClient(string pipeName, Func<int?> expectedServerPid, 
     private static readonly TimeSpan ReprobeAfter = TimeSpan.FromSeconds(60);
     // Service stops wait up to 10 s each; give a multi-service recipe room.
     private static readonly TimeSpan ResponseTimeout = TimeSpan.FromSeconds(60);
+    // Status is read on the UI thread (menu opening); never wait long there.
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
 
     private readonly object _gate = new();
     private volatile HelperStatus _status = HelperStatus.NotInstalled;
@@ -37,7 +39,7 @@ public sealed class HelperClient(string pipeName, Func<int?> expectedServerPid, 
                 // Don't stall the UI behind a long-running request.
                 if (Monitor.TryEnter(_gate))
                 {
-                    try { Exchange(new HelperRequest(HelperProtocol.Version, HelperProtocol.Ping)); }
+                    try { Exchange(new HelperRequest(HelperProtocol.Version, HelperProtocol.Ping), ProbeTimeout); }
                     finally { Monitor.Exit(_gate); }
                 }
             }
@@ -48,10 +50,10 @@ public sealed class HelperClient(string pipeName, Func<int?> expectedServerPid, 
     public HelperResponse? Send(string op, string? recipeId)
     {
         if (Status != HelperStatus.Running) return null;
-        lock (_gate) return Exchange(new HelperRequest(HelperProtocol.Version, op, recipeId));
+        lock (_gate) return Exchange(new HelperRequest(HelperProtocol.Version, op, recipeId), ResponseTimeout);
     }
 
-    private HelperResponse? Exchange(HelperRequest request)
+    private HelperResponse? Exchange(HelperRequest request, TimeSpan responseTimeout)
     {
         _lastProbeUtc = DateTime.UtcNow;
         try
@@ -67,7 +69,7 @@ public sealed class HelperClient(string pipeName, Func<int?> expectedServerPid, 
 
             HelperWire.Write(pipe, request);
             var read = Task.Run(() => HelperWire.Read<HelperResponse>(pipe));
-            if (!read.Wait(ResponseTimeout))
+            if (!read.Wait(responseTimeout))
                 return Unavailable("helper did not answer in time");
 
             if (read.Result is not { } response)

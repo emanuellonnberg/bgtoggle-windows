@@ -6,7 +6,7 @@ namespace BgToggle;
 /// recipe id must be in the installed allow-list, and kills obey
 /// <see cref="KillRule"/>.
 /// </summary>
-public sealed class HelperRequestHandler(HelperAllowList allow, IHelperActions actions, string appVersion)
+public sealed class HelperRequestHandler(HelperAllowList allow, IHelperActions actions, string appVersion, string? recipesError = null)
 {
     public HelperResponse Handle(HelperRequest request, int clientSessionId)
     {
@@ -18,6 +18,9 @@ public sealed class HelperRequestHandler(HelperAllowList allow, IHelperActions a
 
         if (request.Op is not (HelperProtocol.StopServices or HelperProtocol.StartServices or HelperProtocol.KillProcesses))
             return Fail($"unknown op '{request.Op}'");
+
+        if (recipesError is not null)
+            return Fail(recipesError);
 
         if (request.RecipeId is null || !allow.TryGet(request.RecipeId, out var recipe))
             return Fail($"recipe '{request.RecipeId}' is not in the installed recipes");
@@ -60,7 +63,10 @@ public sealed class HelperRequestHandler(HelperAllowList allow, IHelperActions a
         {
             try
             {
-                actions.KillTree(p.Pid);
+                // A session-0 service host's tree can include per-user
+                // helpers in other sessions; only client-session roots take
+                // their tree with them.
+                actions.Kill(p, entireTree: p.SessionId != 0);
                 log.Add($"killed PID {p.Pid} ({p.Name}) in session {p.SessionId}");
             }
             catch (Exception ex)

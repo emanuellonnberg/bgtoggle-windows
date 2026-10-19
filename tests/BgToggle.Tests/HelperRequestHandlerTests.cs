@@ -123,4 +123,64 @@ public class HelperRequestHandlerTests
 
         Assert.False(_handler.Handle(Req(HelperProtocol.KillProcesses), 1).Ok);
     }
+
+    [Fact]
+    public void Kill_Session0ServiceHost_WithoutTree_ClientSessionWithTree()
+    {
+        // A service host's tree can reach into other users' sessions
+        // (per-session helpers), so only client-session roots take their tree.
+        _actions.ServicePids["RzSvc"] = 12;
+        _actions.Processes.AddRange(new[] { new RunningProcess(10, 1, "razer"), new RunningProcess(12, 0, "RzSvc") });
+
+        _handler.Handle(Req(HelperProtocol.KillProcesses), 1);
+
+        Assert.True(_actions.KilledTree[10]);
+        Assert.False(_actions.KilledTree[12]);
+    }
+
+    [Fact]
+    public void RecipesLoadError_ReportedClearly()
+    {
+        var handler = new HelperRequestHandler(HelperAllowList.Empty, _actions, "1.2.3",
+            recipesError: "installed recipes.json could not be loaded");
+
+        var r = handler.Handle(Req(HelperProtocol.StopServices), 1);
+
+        Assert.False(r.Ok);
+        Assert.Contains("installed recipes.json could not be loaded", r.Error);
+        Assert.True(handler.Handle(Req(HelperProtocol.Ping, id: null), 1).Ok);
+    }
+}
+
+public class SystemHelperActionsTests
+{
+    [Fact]
+    public void Kill_RechecksIdentity_RefusesWhenNameDiffers()
+    {
+        // Stands in for PID reuse: the snapshot said "someone-else", but the
+        // PID now belongs to another process. It must survive.
+        var name = "bgtoggle-test-" + Guid.NewGuid().ToString("N")[..8];
+        var exe = Path.Combine(Path.GetTempPath(), name + ".exe");
+        File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), exe);
+        using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, "/k")
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true
+        })!;
+        try
+        {
+            var stale = new RunningProcess(proc.Id, proc.SessionId, "someone-else");
+
+            Assert.Throws<InvalidOperationException>(() => new SystemHelperActions().Kill(stale, entireTree: false));
+            Assert.False(proc.WaitForExit(500), "process with a different name must not be killed");
+        }
+        finally
+        {
+            try { if (!proc.HasExited) proc.Kill(); proc.WaitForExit(2000); } catch { }
+            try { File.Delete(exe); } catch { }
+        }
+    }
+
+    [Fact]
+    public void HelperLogDir_IsUnderInstallDir() =>
+        Assert.Equal(Path.Combine(@"C:\Program Files\BgToggle", "logs"), HelperPaths.LogDir(@"C:\Program Files\BgToggle"));
 }

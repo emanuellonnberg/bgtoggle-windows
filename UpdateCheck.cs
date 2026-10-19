@@ -38,7 +38,7 @@ public static partial class UpdateCheck
     public static Version? ParseTag(string tag)
     {
         var m = TagPattern().Match(tag);
-        return m.Success ? Version.Parse(m.Groups[1].Value) : null;
+        return m.Success && Version.TryParse(m.Groups[1].Value, out var v) ? v : null;
     }
 
     public static bool IsNewer(LatestRelease release, Version current)
@@ -67,6 +67,6 @@ public static partial class UpdateCheck
     private static bool Flag(JsonElement root, string name) =>
         root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
 
-    [GeneratedRegex(@"^[vV]?(\d+\.\d+\.\d+)$")]
+    [GeneratedRegex(@"^[vV]?([0-9]+\.[0-9]+\.[0-9]+)$")]
     private static partial Regex TagPattern();
 }

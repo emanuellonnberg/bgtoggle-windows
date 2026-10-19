@@ -15,6 +15,9 @@ AppPublisherURL=https://github.com/emanuellonnberg/bgtoggle-windows
 AppSupportURL=https://github.com/emanuellonnberg/bgtoggle-windows/issues
 AppUpdatesURL=https://github.com/emanuellonnberg/bgtoggle-windows/releases
 DefaultDirName={autopf}\BgToggle
+; The LocalSystem helper runs from {app}, so it must be the admin-only
+; Program Files folder: no directory page, and PrepareToInstall rejects /DIR=.
+DisableDirPage=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
@@ -32,7 +35,8 @@ SolidCompression=yes
 WizardStyle=modern
 
 [Tasks]
-Name: "startatlogon"; Description: "Start BgToggle when I sign in"; GroupDescription: "Startup:"
+; Upgrades keep whatever the user chose later in the tray menu.
+Name: "startatlogon"; Description: "Start BgToggle when I sign in"; GroupDescription: "Startup:"; Check: not IsUpgrade
 
 [Files]
 Source: "publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -48,6 +52,10 @@ Name: "{autoprograms}\BgToggle"; Filename: "{app}\BgToggle.exe"
 Filename: "{app}\BgToggle.exe"; Parameters: "--first-run --start-at-logon={code:LogonFlag} --exit-after-setup"; Flags: runasoriginaluser runhidden waituntilterminated; StatusMsg: "Configuring BgToggle..."
 Filename: "{app}\BgToggle.exe"; Description: "Launch BgToggle"; Flags: runasoriginaluser nowait postinstall skipifsilent
 
+[UninstallDelete]
+; Written by the helper service at runtime, so Setup doesn't track it.
+Type: filesandordirs; Name: "{app}\logs"
+
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM BgToggle.exe /F"; Flags: runhidden waituntilterminated; RunOnceId: "StopTray"
 Filename: "{app}\BgToggle.exe"; Parameters: "--uninstall-cleanup"; Flags: runhidden waituntilterminated; RunOnceId: "RestoreAutostart"
@@ -56,9 +64,29 @@ Filename: "{sys}\net.exe"; Parameters: "stop BgToggleHelper"; Flags: runhidden w
 Filename: "{sys}\sc.exe"; Parameters: "delete BgToggleHelper"; Flags: runhidden waituntilterminated; RunOnceId: "DeleteHelper"
 
 [Code]
+var
+  WasInstalled: Boolean;
+
+function InitializeSetup(): Boolean;
+begin
+  // Captured up front: by the time [Run] executes, this install has
+  // created the uninstall key itself.
+  WasInstalled := RegKeyExists(HKLM,
+    'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8C7A3F52-6E1B-4C2D-9A57-3B1E0D4F6A21}_is1');
+  Result := True;
+end;
+
+function IsUpgrade(): Boolean;
+begin
+  Result := WasInstalled;
+end;
+
 function LogonFlag(Param: String): String;
 begin
-  if WizardIsTaskSelected('startatlogon') then
+  // 'keep' is neither on nor off, so the tray leaves the current setting alone.
+  if IsUpgrade() then
+    Result := 'keep'
+  else if WizardIsTaskSelected('startatlogon') then
     Result := 'on'
   else
     Result := 'off';
@@ -76,6 +104,13 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
+  if CompareText(RemoveBackslash(WizardDirValue), ExpandConstant('{autopf}\BgToggle')) <> 0 then
+  begin
+    Result := 'BgToggle must be installed in ' + ExpandConstant('{autopf}\BgToggle') +
+              ' so its helper service runs from a folder only administrators can change.';
+    Exit;
+  end;
+
   // Upgrade: free the files the running tray and helper hold.
   RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/IM BgToggle.exe /F');
   RunHidden(ExpandConstant('{sys}\net.exe'), 'stop BgToggleHelper');
