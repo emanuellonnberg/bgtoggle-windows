@@ -13,6 +13,7 @@ public class ProfileEditor : Form
     private readonly ListBox _profileList;
     private readonly CheckedListBox _appList;
     private readonly TextBox _hotkeyBox;
+    private readonly CheckBox _allAppsCheck;
     private readonly Button _newBtn, _renameBtn, _deleteBtn, _saveBtn, _cancelBtn;
     private readonly Label _hint;
 
@@ -24,7 +25,7 @@ public class ProfileEditor : Form
     public ProfileEditor(IEnumerable<Profile> profiles, IEnumerable<AppDefinition> apps)
     {
         // Deep-copy profiles so Cancel really cancels.
-        _profiles = profiles.Select(p => new Profile(p.Name, new HashSet<string>(p.AppIds), p.Hotkey)).ToList();
+        _profiles = profiles.Select(p => p with { AppIds = new HashSet<string>(p.AppIds) }).ToList();
         _apps = apps.ToList();
 
         Text = "BgToggle — Manage profiles";
@@ -83,6 +84,20 @@ public class ProfileEditor : Form
         foreach (var a in _apps) _appList.Items.Add(a.DisplayName, false);
         _appList.ItemCheck += OnAppItemCheck;
 
+        _allAppsCheck = new CheckBox
+        {
+            Dock = DockStyle.Top,
+            Height = 28,
+            Padding = new Padding(8, 0, 8, 0),
+            Text = "All apps (including ones added later)"
+        };
+        _allAppsCheck.CheckedChanged += (_, _) =>
+        {
+            _appList.Enabled = !_allAppsCheck.Checked;
+            if (_suppressItemCheck || _currentIndex < 0) return;
+            _profiles[_currentIndex] = _profiles[_currentIndex] with { AllApps = _allAppsCheck.Checked };
+        };
+
         var hotkeyPanel = new Panel { Dock = DockStyle.Bottom, Height = 36, Padding = new Padding(8, 6, 8, 6) };
         var hkLabel = new Label { Left = 0, Top = 6, Width = 110, Text = "Global hotkey:" };
         _hotkeyBox = new TextBox { Left = 110, Top = 4, Width = 200 };
@@ -99,6 +114,7 @@ public class ProfileEditor : Form
 
         split.Panel2.Controls.Add(_appList);
         split.Panel2.Controls.Add(hotkeyPanel);
+        split.Panel2.Controls.Add(_allAppsCheck);
         split.Panel2.Controls.Add(_hint);
 
         // --- bottom: save / cancel ---
@@ -146,6 +162,8 @@ public class ProfileEditor : Form
         for (int i = 0; i < _apps.Count; i++)
             _appList.SetItemChecked(i, profile.AppIds.Contains(_apps[i].Id));
         _hotkeyBox.Text = profile.Hotkey ?? "";
+        _allAppsCheck.Enabled = true;
+        _allAppsCheck.Checked = profile.AllApps;
         _suppressItemCheck = false;
         _hint.Text = $"Apps to keep running for \"{profile.Name}\":";
     }
@@ -155,6 +173,8 @@ public class ProfileEditor : Form
         _suppressItemCheck = true;
         for (int i = 0; i < _appList.Items.Count; i++)
             _appList.SetItemChecked(i, false);
+        _allAppsCheck.Checked = false;
+        _allAppsCheck.Enabled = false;
         _suppressItemCheck = false;
         _hint.Text = "Select or create a profile.";
     }

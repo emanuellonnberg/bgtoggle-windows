@@ -53,12 +53,18 @@ public record AppDefinition(
 /// A profile is a set of app IDs that SHOULD be running. Apps in the config
 /// but not in this set will be stopped when the profile is applied.
 /// Hotkey: optional global shortcut, e.g. "Ctrl+Alt+1", "Win+Shift+G".
+/// AllApps: every app in the config should run, including ones added later;
+/// AppIds is ignored.
 /// </summary>
 public record Profile(
     string Name,
     HashSet<string> AppIds,
-    string? Hotkey = null
-);
+    string? Hotkey = null,
+    bool AllApps = false
+)
+{
+    public bool Includes(string appId) => AllApps || AppIds.Contains(appId);
+}
 
 /// <summary>
 /// Auto-switch rule. When the named exe starts running, BgToggle applies

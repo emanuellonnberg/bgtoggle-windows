@@ -21,8 +21,9 @@ public static class Logger
     public static void Info(string message) => Write("INFO", message);
     public static void Warn(string message) => Write("WARN", message);
     public static void Error(string message) => Write("ERR ", message);
+    /// <summary>Includes the full exception (type, message, inner, stack).</summary>
     public static void Error(string message, Exception ex) =>
-        Write("ERR ", $"{message}: {ex.GetType().Name}: {ex.Message}");
+        Write("ERR ", $"{message}: {ex}");
 
     private static void Write(string level, string message)
     {
