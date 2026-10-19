@@ -12,20 +12,6 @@ public enum KillMethod
 }
 
 /// <summary>
-/// Where an app's autostart entry lives.
-/// </summary>
-public enum AutostartMethod
-{
-    None,
-    /// <summary>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</summary>
-    RegistryRunUser,
-    /// <summary>HKLM\Software\Microsoft\Windows\CurrentVersion\Run (needs admin to write).</summary>
-    RegistryRun,
-    /// <summary>Shortcut/script in the user's Startup folder.</summary>
-    StartupFolder
-}
-
-/// <summary>
 /// One managed app. May reference a Recipe (which carries shutdown knowledge,
 /// process names, default install path) and override individual fields.
 ///

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace BgToggle;
 
@@ -12,15 +11,7 @@ namespace BgToggle;
 /// </summary>
 public static class RecipeStore
 {
-    public static readonly JsonSerializerOptions Options = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
-    };
+    public static JsonSerializerOptions Options => RecipeFile.Options;
 
     public static string BundledPath { get; } =
         Path.Combine(AppContext.BaseDirectory, "recipes.json");
@@ -63,9 +54,7 @@ public static class RecipeStore
         existing.RemoveAll(r => string.Equals(r.Id, recipe.Id, StringComparison.OrdinalIgnoreCase));
         existing.Add(recipe);
 
-        Directory.CreateDirectory(Path.GetDirectoryName(LocalPath)!);
-        var doc = new RecipesFile(existing);
-        File.WriteAllText(LocalPath, JsonSerializer.Serialize(doc, Options));
+        RecipeFile.Save(LocalPath, existing);
         Logger.Info($"Saved local recipe '{recipe.Id}' to {LocalPath}");
     }
 
@@ -79,9 +68,7 @@ public static class RecipeStore
         }
         try
         {
-            var json = File.ReadAllText(path);
-            var doc = JsonSerializer.Deserialize<RecipesFile>(json, Options);
-            return doc?.Recipes ?? new();
+            return RecipeFile.Load(path);
         }
         catch (Exception ex)
         {
@@ -100,6 +87,4 @@ public static class RecipeStore
         if (string.IsNullOrEmpty(value)) return value;
         return Environment.ExpandEnvironmentVariables(value);
     }
-
-    private record RecipesFile([property: JsonPropertyName("recipes")] List<Recipe> Recipes);
 }

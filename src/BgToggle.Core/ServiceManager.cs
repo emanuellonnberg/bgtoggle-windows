@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.ServiceProcess;
 
 namespace BgToggle;
@@ -84,6 +85,56 @@ public static class ServiceManager
             return false;
         }
     }
+
+    /// <summary>
+    /// PID of the service's process, or null if missing, stopped or not
+    /// queryable. Opens with SERVICE_QUERY_STATUS only so it works unelevated
+    /// (ServiceController.ServiceHandle asks for far more access).
+    /// </summary>
+    public static int? ProcessId(string serviceName)
+    {
+        var scm = OpenSCManager(null, null, SC_MANAGER_CONNECT);
+        if (scm == IntPtr.Zero) return null;
+        try
+        {
+            var svc = OpenService(scm, serviceName, SERVICE_QUERY_STATUS);
+            if (svc == IntPtr.Zero) return null;
+            try
+            {
+                var size = Marshal.SizeOf<SERVICE_STATUS_PROCESS>();
+                var buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    if (!QueryServiceStatusEx(svc, SC_STATUS_PROCESS_INFO, buffer, size, out _)) return null;
+                    var status = Marshal.PtrToStructure<SERVICE_STATUS_PROCESS>(buffer);
+                    return status.dwProcessId == 0 ? null : (int)status.dwProcessId;
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            finally { CloseServiceHandle(svc); }
+        }
+        finally { CloseServiceHandle(scm); }
+    }
+
+    private const uint SC_MANAGER_CONNECT = 0x0001;
+    private const uint SERVICE_QUERY_STATUS = 0x0004;
+    private const int SC_STATUS_PROCESS_INFO = 0;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SERVICE_STATUS_PROCESS
+    {
+        public uint dwServiceType, dwCurrentState, dwControlsAccepted, dwWin32ExitCode,
+            dwServiceSpecificExitCode, dwCheckPoint, dwWaitHint, dwProcessId, dwServiceFlags;
+    }
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenSCManager(string? machineName, string? databaseName, uint access);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenService(IntPtr scm, string serviceName, uint access);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool QueryServiceStatusEx(IntPtr service, int infoLevel, IntPtr buffer, int bufferSize, out int bytesNeeded);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool CloseServiceHandle(IntPtr handle);
 
     public static bool Exists(string serviceName)
     {
