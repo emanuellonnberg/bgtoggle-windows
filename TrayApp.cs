@@ -36,6 +36,7 @@ public class TrayApp : ApplicationContext
 
         _hotkeys = new HotkeyManager();
         RebuildMenu();
+        WarnIfElevated();
         RegisterHotkeys();
         StartTriggerWatcher();
     }
@@ -62,6 +63,19 @@ public class TrayApp : ApplicationContext
                 "BgToggle — config error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return ConfigStore.Default();
         }
+    }
+
+    /// <summary>
+    /// Anything BgToggle launches inherits its token, so an elevated tray
+    /// starts Spotify & co. as admin. The installer never does this; say so
+    /// if someone ran it that way by hand.
+    /// </summary>
+    private void WarnIfElevated()
+    {
+        if (!Elevation.IsElevated()) return;
+        Logger.Warn("BgToggle is running as administrator; apps it starts will be too");
+        _icon.ShowBalloonTip(5000, "BgToggle",
+            "BgToggle is running as administrator; apps it starts will be too.", ToolTipIcon.Warning);
     }
 
     private void StartTriggerWatcher()
@@ -166,14 +180,12 @@ public class TrayApp : ApplicationContext
         var helperItem = new ToolStripMenuItem(HelperStatusText(), null, (_, _) => OpenUrl(HelperHelpUrl));
         sysMenu.DropDownItems.Add(helperItem);
         sysMenu.DropDownItems.Add(new ToolStripSeparator());
-        var installAuto = new ToolStripMenuItem(
-            AutostartTask.IsInstalled() ? "Reinstall autostart (admin)…" : "Install autostart (admin)…",
-            null, (_, _) => InstallAutostartTask());
-        var removeAuto = new ToolStripMenuItem("Remove autostart…", null, (_, _) => UninstallAutostartTask())
-        { Enabled = AutostartTask.IsInstalled() };
+        var startAtLogon = new ToolStripMenuItem("Start BgToggle at logon", null, (_, _) => ToggleStartAtLogon())
+        { Checked = SafeIsStartAtLogon() };
+        var restoreAll = new ToolStripMenuItem("Restore all autostart entries", null, (_, _) => RestoreAllAutostart());
         var openLogs = new ToolStripMenuItem("Open logs folder", null, (_, _) => OpenFolder(Logger.LogDir));
-        sysMenu.DropDownItems.Add(installAuto);
-        sysMenu.DropDownItems.Add(removeAuto);
+        sysMenu.DropDownItems.Add(startAtLogon);
+        sysMenu.DropDownItems.Add(restoreAll);
         sysMenu.DropDownItems.Add(new ToolStripSeparator());
         sysMenu.DropDownItems.Add(openLogs);
         menu.Items.Add(sysMenu);
@@ -455,36 +467,39 @@ public class TrayApp : ApplicationContext
         Logger.Info($"Saved {_config.Triggers!.Count} trigger(s); re-primed watcher");
     }
 
-    private void InstallAutostartTask()
+    private static bool SafeIsStartAtLogon()
     {
-        var exe = Application.ExecutablePath;
-        var ok = AutostartTask.Install(exe);
-        if (ok)
-        {
-            Logger.Info($"Scheduled task installed for {exe}");
-            MessageBox.Show("BgToggle will now start automatically with admin rights at logon.",
-                "BgToggle", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            RebuildMenu();
-        }
-        else
-        {
-            MessageBox.Show("Could not install scheduled task. Did you accept the UAC prompt?",
-                "BgToggle", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
+        try { return TrayAutostart.IsEnabled(); }
+        catch (Exception ex) { Logger.Error("Reading start-at-logon failed", ex); return false; }
     }
 
-    private void UninstallAutostartTask()
+    private void ToggleStartAtLogon()
     {
-        var ok = AutostartTask.Uninstall();
-        if (ok)
+        try
         {
-            Logger.Info("Scheduled task removed");
-            RebuildMenu();
+            var enable = !TrayAutostart.IsEnabled();
+            TrayAutostart.Set(enable, Application.ExecutablePath);
+            Logger.Info($"Start at logon {(enable ? "enabled" : "disabled")}");
         }
-        else
+        catch (Exception ex)
         {
-            MessageBox.Show("Could not remove scheduled task.",
-                "BgToggle", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            Logger.Error("Changing start-at-logon failed", ex);
+        }
+        RebuildMenu();
+    }
+
+    private void RestoreAllAutostart()
+    {
+        try
+        {
+            var n = AutostartManager.RestoreAllForCurrentUser();
+            Logger.Info($"Restored {n} autostart entr{(n == 1 ? "y" : "ies")}");
+            _icon.ShowBalloonTip(2000, "BgToggle", $"Restored {n} autostart entr{(n == 1 ? "y" : "ies")}", ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Restore all autostart entries failed", ex);
+            _icon.ShowBalloonTip(3000, "BgToggle", $"Restore failed: {ex.Message}", ToolTipIcon.Error);
         }
     }
 
