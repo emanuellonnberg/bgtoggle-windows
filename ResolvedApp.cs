@@ -18,5 +18,8 @@ public record ResolvedApp(
     AutostartMethod Autostart,
     string? AutostartKey,
     bool RequiresAdmin,
-    string? Notes
+    string? Notes,
+    string? RecipeId = null,
+    // Recipe came from the bundled file, so the helper may act on it by id.
+    bool HelperEligible = false
 );

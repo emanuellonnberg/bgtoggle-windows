@@ -82,10 +82,13 @@ public static class AppResolver
     /// Combine an AppDefinition with its Recipe (if any) into a runtime plan.
     /// AppDefinition values override recipe values when set.
     /// </summary>
-    public static ResolvedApp Resolve(AppDefinition app) =>
-        Resolve(app, app.RecipeId is null ? null : RecipeStore.Find(app.RecipeId));
+    public static ResolvedApp Resolve(AppDefinition app)
+    {
+        var recipe = app.RecipeId is null ? null : RecipeStore.Find(app.RecipeId);
+        return Resolve(app, recipe, recipe is not null && RecipeStore.IsBundled(recipe.Id));
+    }
 
-    public static ResolvedApp Resolve(AppDefinition app, Recipe? recipe)
+    public static ResolvedApp Resolve(AppDefinition app, Recipe? recipe, bool recipeIsBundled = false)
     {
         var processNames = recipe?.ProcessNames is { Length: > 0 }
             ? recipe.ProcessNames
@@ -133,7 +136,9 @@ public static class AppResolver
             Autostart: autostart,
             AutostartKey: autostartKey,
             RequiresAdmin: recipe?.RequiresAdmin ?? false,
-            Notes: recipe?.Notes
+            Notes: recipe?.Notes,
+            RecipeId: recipe?.Id,
+            HelperEligible: recipe is not null && recipeIsBundled
         );
     }
 }
