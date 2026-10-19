@@ -73,7 +73,8 @@ public record Config(
     string? ActiveProfile = null,
     int LargeDiffConfirmThreshold = 5,
     bool ConfirmLargeDiffs = true,
-    List<Trigger>? Triggers = null
+    List<Trigger>? Triggers = null,
+    bool CheckForUpdates = true
 );
 
 public static class AppResolver

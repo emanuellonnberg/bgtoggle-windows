@@ -37,6 +37,7 @@ public class TrayApp : ApplicationContext
         _hotkeys = new HotkeyManager();
         RebuildMenu();
         WarnIfElevated();
+        StartUpdateChecks();
         RegisterHotkeys();
         StartTriggerWatcher();
     }
@@ -76,6 +77,55 @@ public class TrayApp : ApplicationContext
         Logger.Warn("BgToggle is running as administrator; apps it starts will be too");
         _icon.ShowBalloonTip(5000, "BgToggle",
             "BgToggle is running as administrator; apps it starts will be too.", ToolTipIcon.Warning);
+    }
+
+    // --- update check ---
+
+    private readonly System.Windows.Forms.Timer _updateTimer = new() { Interval = 30_000 };
+    private LatestRelease? _availableUpdate;
+    private string? _balloonUrl;
+
+    private void StartUpdateChecks()
+    {
+        _icon.BalloonTipClicked += (_, _) => { if (_balloonUrl is { } url) OpenUrl(url); };
+        _icon.BalloonTipClosed += (_, _) => _balloonUrl = null;
+        _updateTimer.Tick += async (_, _) =>
+        {
+            _updateTimer.Interval = 60 * 60 * 1000;   // first tick 30 s after start, then hourly
+            await CheckForUpdateAsync();
+        };
+        _updateTimer.Start();
+    }
+
+    private async Task CheckForUpdateAsync()
+    {
+        var current = typeof(Program).Assembly.GetName().Version ?? new Version(0, 0, 0);
+        if (!_config.CheckForUpdates || UpdateCheck.IsDevBuild(current)) return;
+
+        var state = AppStateStore.Load();
+        if (!UpdateCheck.ShouldCheck(state.LastUpdateCheckUtc, DateTime.UtcNow)) return;
+
+        LatestRelease? latest = null;
+        try { latest = await Task.Run(() => UpdateCheck.FetchLatestAsync(current)); }
+        catch (Exception ex) { Logger.Info($"Update check failed: {ex.GetType().Name}: {ex.Message}"); }
+
+        // Record every attempt, failed or not, so a bad network doesn't mean
+        // hitting GitHub every hour.
+        state = state with { LastUpdateCheckUtc = DateTime.UtcNow };
+        if (latest is not null && UpdateCheck.IsNewer(latest, current))
+        {
+            Logger.Info($"Update available: {latest.TagName}");
+            _availableUpdate = latest;
+            RebuildMenu();
+            if (state.LastNotifiedVersion != latest.TagName)
+            {
+                _balloonUrl = latest.HtmlUrl;
+                _icon.ShowBalloonTip(5000, "BgToggle", $"Version {latest.TagName} is available. Click to open the release page.", ToolTipIcon.Info);
+                state = state with { LastNotifiedVersion = latest.TagName };
+            }
+        }
+        try { AppStateStore.Save(state); }
+        catch (Exception ex) { Logger.Error("Saving app state failed", ex); }
     }
 
     private void StartTriggerWatcher()
@@ -132,6 +182,13 @@ public class TrayApp : ApplicationContext
     private void RebuildMenu()
     {
         var menu = new ContextMenuStrip();
+
+        if (_availableUpdate is { } update)
+        {
+            menu.Items.Add(new ToolStripMenuItem($"Update available: {update.TagName}…", null, (_, _) => OpenUrl(update.HtmlUrl))
+            { Font = new Font(menu.Font, FontStyle.Bold) });
+            menu.Items.Add(new ToolStripSeparator());
+        }
 
         if (_config.Profiles.Count > 0)
         {
@@ -586,6 +643,7 @@ public class TrayApp : ApplicationContext
         _icon.Dispose();
         ico?.Dispose();
         _hotkeys.Dispose();
+        _updateTimer.Dispose();
         _triggers?.Dispose();
         base.ExitThreadCore();
     }
