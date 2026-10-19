@@ -57,7 +57,7 @@ public static class ProcessSuggester
         var coveredProcessNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in recipes)
             foreach (var p in r.ProcessNames)
-                coveredProcessNames.Add(StripExe(p));
+                coveredProcessNames.Add(ExeNames.Strip(p));
 
         // Snapshot all processes with metadata where readable.
         var all = new List<(Process p, string? exe, string? dir, string? product)>();
@@ -234,7 +234,4 @@ public static class ProcessSuggester
         }
         return false;
     }
-
-    private static string StripExe(string n) =>
-        n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? n[..^4] : n;
 }
