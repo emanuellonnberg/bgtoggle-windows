@@ -35,3 +35,7 @@ Desktop.ini
 ## App-local config (per-machine)
 config.json
 *.local.json
+
+## Packaging
+publish/
+installer/Output/
