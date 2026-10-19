@@ -61,18 +61,18 @@ public sealed class HelperClient(string pipeName, Func<int?> expectedServerPid, 
             if (expectedServerPid() is not int expected)
                 return Unavailable(null);
 
-            using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+            using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             pipe.Connect(connectTimeoutMs);
 
             if (PipeNative.ServerPid(pipe) != expected)
                 return Unavailable($"pipe '{pipeName}' is served by an unexpected process; ignoring it");
 
-            HelperWire.Write(pipe, request);
-            var read = Task.Run(() => HelperWire.Read<HelperResponse>(pipe));
-            if (!read.Wait(responseTimeout))
-                return Unavailable("helper did not answer in time");
-
-            if (read.Result is not { } response)
+            // Blocking on async pipe I/O ties up no thread-pool thread, and
+            // the wire helpers don't resume on the caller's (UI) context.
+            using var timeout = new CancellationTokenSource(responseTimeout);
+            HelperWire.WriteAsync(pipe, request, timeout.Token).GetAwaiter().GetResult();
+            var response = HelperWire.ReadAsync<HelperResponse>(pipe, timeout.Token).GetAwaiter().GetResult();
+            if (response is null)
                 return Unavailable("helper closed the connection");
 
             if (response.Protocol != HelperProtocol.Version)
@@ -85,8 +85,12 @@ public sealed class HelperClient(string pipeName, Func<int?> expectedServerPid, 
             _status = HelperStatus.Running;
             return response;
         }
+        catch (OperationCanceledException)
+        {
+            return Unavailable("helper did not answer in time");
+        }
         catch (Exception ex) when (ex is TimeoutException or IOException or UnauthorizedAccessException
-                                      or InvalidDataException or AggregateException)
+                                      or InvalidDataException)
         {
             return Unavailable(null);
         }

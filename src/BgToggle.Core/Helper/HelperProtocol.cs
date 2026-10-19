@@ -65,10 +65,53 @@ public static class HelperWire
                 throw new InvalidDataException($"message exceeds {HelperProtocol.MaxMessageBytes} bytes");
             buffer.WriteByte((byte)b);
         }
+        return Deserialize<T>(buffer.ToArray());
+    }
 
+    /// <summary>
+    /// Async counterparts used by the helper and the tray. Waiting on async
+    /// pipe I/O holds no thread-pool thread, so a few slow or idle clients
+    /// can't starve the pool (blocking reads did, on 2-core machines).
+    /// ConfigureAwait(false) because the tray calls these from the UI thread.
+    /// </summary>
+    public static async Task WriteAsync<T>(Stream s, T message, CancellationToken ct)
+    {
+        var json = JsonSerializer.SerializeToUtf8Bytes(message, Options);
+        var bytes = new byte[json.Length + 1];
+        json.CopyTo(bytes, 0);
+        bytes[^1] = (byte)'\n';
+        await s.WriteAsync(bytes, ct).ConfigureAwait(false);
+        await s.FlushAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Same contract as <see cref="Read{T}"/>; one message per connection, so bytes after the newline are ignored.</summary>
+    public static async Task<T?> ReadAsync<T>(Stream s, CancellationToken ct) where T : class
+    {
+        var buffer = new MemoryStream();
+        var chunk = new byte[4096];
+        while (true)
+        {
+            var n = await s.ReadAsync(chunk, ct).ConfigureAwait(false);
+            if (n == 0)
+            {
+                if (buffer.Length == 0) return null;
+                break;
+            }
+            var newline = Array.IndexOf(chunk, (byte)'\n', 0, n);
+            var take = newline >= 0 ? newline : n;
+            if (buffer.Length + take > HelperProtocol.MaxMessageBytes)
+                throw new InvalidDataException($"message exceeds {HelperProtocol.MaxMessageBytes} bytes");
+            buffer.Write(chunk, 0, take);
+            if (newline >= 0) break;
+        }
+        return Deserialize<T>(buffer.ToArray());
+    }
+
+    private static T Deserialize<T>(byte[] bytes) where T : class
+    {
         try
         {
-            return JsonSerializer.Deserialize<T>(buffer.ToArray(), Options)
+            return JsonSerializer.Deserialize<T>(bytes, Options)
                 ?? throw new InvalidDataException("empty message");
         }
         catch (JsonException ex)

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Run tests as if on a 2-core machine (like the GitHub runner), so pipe
+     code that only works with a large thread pool fails locally too. -->
+<RunSettings>
+  <RunConfiguration>
+    <EnvironmentVariables>
+      <DOTNET_PROCESSOR_COUNT>2</DOTNET_PROCESSOR_COUNT>
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>

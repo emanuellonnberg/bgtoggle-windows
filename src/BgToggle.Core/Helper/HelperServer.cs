@@ -17,7 +17,8 @@ public sealed class HelperServer
     private readonly string _pipeName;
     private readonly PipeSecurity? _security;
     private readonly Func<HelperRequest, int, HelperResponse> _handle;
-    private readonly object _handleGate = new();
+    // Requests run one at a time; waiters queue without holding a thread.
+    private readonly SemaphoreSlim _handleGate = new(1, 1);
     private int _activeConnections;
     private readonly SemaphoreSlim _slots = new(MaxConcurrentConnections);
 
@@ -105,15 +106,26 @@ public sealed class HelperServer
                 continue;
             }
 
-            var connected = server;
-            _ = Task.Run(() => Serve(connected));
+            _ = ServeAsync(server);
         }
     }
 
-    private void Serve(NamedPipeServerStream server)
+    private async Task ServeAsync(NamedPipeServerStream server)
     {
         Interlocked.Increment(ref _activeConnections);
-        try { ServeCore(server); }
+        try
+        {
+            await using (server)
+                await ServeCoreAsync(server).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException or InvalidOperationException)
+        {
+            // Client vanished or stalled mid-conversation; nothing to tell it.
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Helper request failed", ex);
+        }
         finally
         {
             Interlocked.Decrement(ref _activeConnections);
@@ -121,42 +133,42 @@ public sealed class HelperServer
         }
     }
 
-    private void ServeCore(NamedPipeServerStream server)
+    private async Task ServeCoreAsync(NamedPipeServerStream server)
     {
-        using (server)
+        var clientPid = PipeNative.ClientPid(server);
+        var clientSession = clientPid is int pid ? PipeNative.SessionOf(pid) : null;
+
+        // Async read with a deadline: an idle client costs no thread, and is
+        // dropped after ReadTimeout.
+        using var timeout = new CancellationTokenSource(ReadTimeout);
+        HelperRequest? request;
+        HelperResponse response;
+        try
         {
-            try
-            {
-                var clientPid = PipeNative.ClientPid(server);
-                var clientSession = clientPid is int pid ? PipeNative.SessionOf(pid) : null;
-
-                var read = Task.Run(() => HelperWire.Read<HelperRequest>(server));
-                // WhenAny, not Wait: Wait would rethrow a bad request as an
-                // AggregateException and skip the "bad request" reply.
-                if (Task.WhenAny(read, Task.Delay(ReadTimeout)).Result != read)
-                    return;                            // disposing the pipe unblocks the read
-
-                HelperResponse response;
-                if (read.IsFaulted)
-                    response = new HelperResponse(HelperProtocol.Version, false, "bad request");
-                else if (read.Result is not { } request)
-                    return;                            // client left without asking
-                else if (clientSession is not int session)
-                    response = new HelperResponse(HelperProtocol.Version, false, "cannot identify client");
-                else
-                    lock (_handleGate) response = _handle(request, session);
-
-                HelperWire.Write(server, response);
-            }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
-            {
-                // Client vanished mid-conversation; nothing to tell it.
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("Helper request failed", ex);
-            }
+            request = await HelperWire.ReadAsync<HelperRequest>(server, timeout.Token).ConfigureAwait(false);
         }
+        catch (InvalidDataException)
+        {
+            await HelperWire.WriteAsync(server, new HelperResponse(HelperProtocol.Version, false, "bad request"), timeout.Token)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        if (request is null) return;   // client left without asking
+
+        if (clientSession is not int session)
+        {
+            response = new HelperResponse(HelperProtocol.Version, false, "cannot identify client");
+        }
+        else
+        {
+            await _handleGate.WaitAsync().ConfigureAwait(false);
+            try { response = _handle(request, session); }
+            finally { _handleGate.Release(); }
+        }
+
+        using var writeTimeout = new CancellationTokenSource(ReadTimeout);
+        await HelperWire.WriteAsync(server, response, writeTimeout.Token).ConfigureAwait(false);
     }
 
     private HelperResponse HandleWithRecipes(HelperRequest request, int clientSession)
