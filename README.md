@@ -35,7 +35,7 @@ A user's `AppDefinition` becomes a thin reference: `{ "id": "spotify", "displayN
 
 ```
 BgToggle/
-├── BgToggle.csproj          .NET 8 + WinForms; ServiceController package
+├── BgToggle.csproj          .NET 10 + WinForms; ServiceController package
 ├── Program.cs               Entry point
 ├── TrayApp.cs               NotifyIcon + ContextMenuStrip
 ├── IconFactory.cs           Generates the tray icon at runtime (no .ico shipped)
