@@ -103,7 +103,7 @@ public static class AppResolver
     {
         var processNames = recipe?.ProcessNames is { Length: > 0 }
             ? recipe.ProcessNames
-            : new[] { StripExe(app.ExeName) };
+            : new[] { ExeNames.Strip(app.ExeName) };
 
         // If user supplied LaunchPath, prefer it. Otherwise recipe default.
         var launchPath = !string.IsNullOrWhiteSpace(app.LaunchPath)
@@ -150,7 +150,4 @@ public static class AppResolver
             Notes: recipe?.Notes
         );
     }
-
-    private static string StripExe(string name) =>
-        name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
 }

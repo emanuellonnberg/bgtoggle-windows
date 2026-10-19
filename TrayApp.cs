@@ -136,10 +136,11 @@ public class TrayApp : ApplicationContext
         if (_config.Apps.Count > 0)
         {
             var appsItem = new ToolStripMenuItem("Apps");
+            var snapshot = ProcessSnapshot.Take();
             foreach (var app in _config.Apps)
             {
                 var resolved = AppResolver.Resolve(app);
-                var running = ProcessManager.IsRunning(resolved);
+                var running = ProcessManager.IsRunning(resolved, snapshot);
                 var label = resolved.RequiresAdmin ? $"{app.DisplayName}  (admin)" : app.DisplayName;
                 var item = new ToolStripMenuItem(label) { Checked = running, Tag = app.Id };
                 if (!string.IsNullOrEmpty(resolved.Notes))
@@ -194,6 +195,7 @@ public class TrayApp : ApplicationContext
         {
             if (topItem is ToolStripMenuItem { Text: "Apps" } appsItem)
             {
+                var snapshot = ProcessSnapshot.Take();
                 foreach (ToolStripItem sub in appsItem.DropDownItems)
                 {
                     if (sub is ToolStripMenuItem mi && mi.Tag is string id)
@@ -202,7 +204,7 @@ public class TrayApp : ApplicationContext
                         if (app is not null)
                         {
                             var resolved = AppResolver.Resolve(app);
-                            mi.Checked = ProcessManager.IsRunning(resolved);
+                            mi.Checked = ProcessManager.IsRunning(resolved, snapshot);
                         }
                     }
                 }
@@ -223,30 +225,50 @@ public class TrayApp : ApplicationContext
 
     private void ApplyProfile(Profile profile) => ApplyProfile(profile, isTriggerDriven: false);
 
-    private void ApplyProfile(Profile profile, bool isTriggerDriven)
-    {
-        var diff = ProfileApplier.Diff(profile, _config);
-        var changes = diff.ToStart.Count + diff.ToStop.Count;
+    // Applies and toggles run off the UI thread: graceful waits and service
+    // stops can take tens of seconds, which used to freeze the tray, hotkeys
+    // and trigger polling. One runs at a time; a profile requested meanwhile
+    // is queued (latest wins) and applied when the current one finishes.
+    private bool _busy;
+    private (string ProfileName, bool IsTriggerDriven)? _queued;
 
-        // Trigger-driven applies skip the confirm dialog — the user is in a
-        // game and can't see / click a UAC-style prompt under fullscreen.
-        if (!isTriggerDriven && _config.ConfirmLargeDiffs && changes >= _config.LargeDiffConfirmThreshold)
+    private async void ApplyProfile(Profile profile, bool isTriggerDriven)
+    {
+        if (_busy)
         {
-            var summary = BuildDiffSummary(diff);
-            var ok = MessageBox.Show(
-                $"Applying \"{profile.Name}\" will make {changes} changes:\n\n{summary}\n\nContinue?",
-                "BgToggle — confirm profile apply",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (ok != DialogResult.Yes) return;
+            Logger.Info($"Busy; queued profile '{profile.Name}'");
+            _queued = (profile.Name, isTriggerDriven);
+            return;
         }
 
-        _icon.Text = $"BgToggle — applying {profile.Name}…";
+        // Busy from here on: the confirm dialog pumps messages, so a hotkey
+        // or trigger could otherwise start a second apply underneath it.
+        _busy = true;
         try
         {
-            Logger.Info($"Applying profile '{profile.Name}' (start {diff.ToStart.Count}, stop {diff.ToStop.Count})");
-            ProfileApplier.Apply(profile, _config, msg => Logger.Info(msg));
+            var diff = ProfileApplier.Diff(profile, _config);
+            var changes = diff.ToStart.Count + diff.ToStop.Count;
+
+            // Trigger-driven applies skip the confirm dialog — the user is in a
+            // game and can't see / click a UAC-style prompt under fullscreen.
+            if (!isTriggerDriven && _config.ConfirmLargeDiffs && changes >= _config.LargeDiffConfirmThreshold)
+            {
+                var summary = BuildDiffSummary(diff);
+                var ok = MessageBox.Show(
+                    $"Applying \"{profile.Name}\" will make {changes} changes:\n\n{summary}\n\nContinue?",
+                    "BgToggle — confirm profile apply",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (ok != DialogResult.Yes) return;
+            }
+
+            // Record the target up front so a trigger firing mid-apply
+            // stashes the profile we are switching to, not the old one.
             _config = _config with { ActiveProfile = profile.Name };
             ConfigStore.Save(_config);
+
+            _icon.Text = $"BgToggle — applying {profile.Name}…";
+            Logger.Info($"Applying profile '{profile.Name}' (start {diff.ToStart.Count}, stop {diff.ToStop.Count})");
+            await Task.Run(() => ProfileApplier.Apply(diff, msg => Logger.Info(msg)));
             _icon.ShowBalloonTip(2000, "BgToggle", $"Profile applied: {profile.Name}", ToolTipIcon.Info);
         }
         catch (Exception ex)
@@ -256,9 +278,26 @@ public class TrayApp : ApplicationContext
         }
         finally
         {
+            _busy = false;
             _icon.Text = "BgToggle";
             RebuildMenu();
+            RunQueued();
         }
+    }
+
+    private void RunQueued()
+    {
+        if (_queued is not { } next) return;
+        _queued = null;
+
+        // Look the profile up again: it may have been edited while queued.
+        var profile = _config.Profiles.FirstOrDefault(p => p.Name == next.ProfileName);
+        if (profile is null)
+        {
+            Logger.Warn($"Queued profile '{next.ProfileName}' no longer exists; skipping");
+            return;
+        }
+        ApplyProfile(profile, next.IsTriggerDriven);
     }
 
     private static string BuildDiffSummary(DiffResult diff)
@@ -280,12 +319,34 @@ public class TrayApp : ApplicationContext
         return sb.ToString().TrimEnd();
     }
 
-    private void ToggleApp(ResolvedApp app)
+    private async void ToggleApp(ResolvedApp app)
     {
-        if (ProcessManager.IsRunning(app))
-            ProcessManager.Stop(app, msg => Logger.Info(msg));
-        else
-            ProcessManager.Start(app, msg => Logger.Info(msg));
+        if (_busy)
+        {
+            _icon.ShowBalloonTip(2000, "BgToggle", "Busy applying a profile; try again in a moment.", ToolTipIcon.Info);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Task.Run(() =>
+            {
+                if (ProcessManager.IsRunning(app))
+                    ProcessManager.Stop(app, msg => Logger.Info(msg));
+                else
+                    ProcessManager.Start(app, msg => Logger.Info(msg));
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Toggle '{app.DisplayName}' threw", ex);
+        }
+        finally
+        {
+            _busy = false;
+            RunQueued();
+        }
     }
 
     private void RunScanner()

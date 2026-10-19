@@ -21,7 +21,7 @@ public static class RecipeScanner
         var byProcess = new Dictionary<string, Recipe>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in recipes)
             foreach (var n in r.ProcessNames)
-                byProcess[StripExe(n)] = r;
+                byProcess[ExeNames.Strip(n)] = r;
 
         var hits = new Dictionary<string, (int count, string? path)>(StringComparer.OrdinalIgnoreCase);
 
@@ -54,7 +54,4 @@ public static class RecipeScanner
         result.Sort((a, b) => string.Compare(a.Recipe.DisplayName, b.Recipe.DisplayName, StringComparison.OrdinalIgnoreCase));
         return result;
     }
-
-    private static string StripExe(string n) =>
-        n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? n[..^4] : n;
 }

@@ -91,7 +91,7 @@ public class TriggerEditor : Form
         _enabledCheck = new CheckBox { Left = lblW, Top = y, Width = fieldW, Text = "Enabled" };
         panel.Controls.Add(_enabledCheck); y += 32;
 
-        _exeBox.TextChanged += (_, _) => Update(t => t with { ExeName = StripExe(_exeBox.Text.Trim()) });
+        _exeBox.TextChanged += (_, _) => Update(t => t with { ExeName = ExeNames.Strip(_exeBox.Text.Trim()) });
         _whileCombo.SelectedIndexChanged += (_, _) =>
         {
             if (_whileCombo.SelectedItem is string s)
@@ -127,9 +127,6 @@ public class TriggerEditor : Form
 
         ReloadList(_triggers.Count > 0 ? 0 : -1);
     }
-
-    private static string StripExe(string s) =>
-        s.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? s[..^4] : s;
 
     private void ReloadList(int select)
     {

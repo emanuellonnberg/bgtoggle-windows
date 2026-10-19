@@ -4,41 +4,36 @@ namespace BgToggle;
 
 public static class ProcessManager
 {
-    public static IReadOnlyList<Process> FindRunning(string exeName)
-    {
-        var name = exeName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-            ? exeName[..^4]
-            : exeName;
-        try
-        {
-            return Process.GetProcessesByName(name);
-        }
-        catch
-        {
-            return Array.Empty<Process>();
-        }
-    }
-
+    /// <summary>Processes matching the given names. Callers must dispose them.</summary>
     public static IReadOnlyList<Process> FindRunning(IEnumerable<string> exeNames)
     {
+        var wanted = new HashSet<string>(exeNames.Select(ExeNames.Strip), StringComparer.OrdinalIgnoreCase);
         var list = new List<Process>();
-        foreach (var n in exeNames) list.AddRange(FindRunning(n));
+        foreach (var p in Process.GetProcesses())
+        {
+            bool match;
+            try { match = wanted.Contains(p.ProcessName); }
+            catch { match = false; /* exited mid-enumeration */ }
+
+            if (match) list.Add(p);
+            else p.Dispose();
+        }
         return list;
     }
 
-    public static bool IsRunning(string exeName) => FindRunning(exeName).Count > 0;
+    public static bool IsRunning(string exeName) => ProcessSnapshot.Take().Contains(exeName);
 
-    public static bool IsRunning(IEnumerable<string> exeNames) =>
-        exeNames.Any(n => FindRunning(n).Count > 0);
+    public static bool IsRunning(IEnumerable<string> exeNames) => ProcessSnapshot.Take().ContainsAny(exeNames);
 
     /// <summary>
     /// Whether the app counts as "on". Service-only apps have no UI process
-    /// to look for, so their service state decides.
+    /// to look for, so their service state decides. Pass a snapshot when
+    /// checking many apps at once.
     /// </summary>
-    public static bool IsRunning(ResolvedApp app) =>
+    public static bool IsRunning(ResolvedApp app, ProcessSnapshot? snapshot = null) =>
         app.Shutdown == ShutdownStrategy.StopServiceOnly && app.ServiceNames.Length > 0
             ? app.ServiceNames.Any(ServiceManager.IsRunning)
-            : IsRunning(app.ProcessNames);
+            : (snapshot ?? ProcessSnapshot.Take()).ContainsAny(app.ProcessNames);
 
     /// <summary>
     /// Turn an app on: the reverse of <see cref="Stop"/>. Service-stop

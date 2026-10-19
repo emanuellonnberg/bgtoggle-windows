@@ -12,17 +12,18 @@ public static class ProfileApplier
     /// Compute the diff between current state (what's actually running) and the
     /// target profile. Apps not in the config are ignored.
     /// </summary>
-    public static DiffResult Diff(Profile target, Config config)
+    public static DiffResult Diff(Profile target, Config config, ProcessSnapshot? snapshot = null)
     {
         var toStart = new List<ResolvedApp>();
         var toStop = new List<ResolvedApp>();
         var ok = new List<ResolvedApp>();
+        snapshot ??= ProcessSnapshot.Take();
 
         foreach (var app in config.Apps)
         {
             var resolved = AppResolver.Resolve(app);
             var shouldRun = target.Includes(app.Id);
-            var isRunning = ProcessManager.IsRunning(resolved);
+            var isRunning = ProcessManager.IsRunning(resolved, snapshot);
 
             if (shouldRun && !isRunning) toStart.Add(resolved);
             else if (!shouldRun && isRunning) toStop.Add(resolved);
@@ -32,10 +33,15 @@ public static class ProfileApplier
         return new DiffResult(toStart, toStop, ok);
     }
 
-    public static void Apply(Profile target, Config config, Action<string>? log = null)
-    {
-        var diff = Diff(target, config);
+    public static void Apply(Profile target, Config config, Action<string>? log = null) =>
+        Apply(Diff(target, config), log);
 
+    /// <summary>
+    /// Apply a precomputed diff, e.g. the one the user just confirmed.
+    /// Touches no UI, so it is safe to run off the UI thread.
+    /// </summary>
+    public static void Apply(DiffResult diff, Action<string>? log = null)
+    {
         // Stop first so apps freeing up VRAM/RAM/audio devices do so before we
         // start the new ones.
         foreach (var app in diff.ToStop)
