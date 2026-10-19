@@ -32,6 +32,12 @@ public static class RecipeValidator
                 issues.Add(new RecipeIssue(r.Id, "ERROR", "service-stop strategy but no serviceNames"));
             }
 
+            if (r.ServiceNames is not null && r.ServicesToLeaveAlone is not null)
+            {
+                foreach (var svc in r.ServiceNames.Intersect(r.ServicesToLeaveAlone, StringComparer.OrdinalIgnoreCase))
+                    issues.Add(new RecipeIssue(r.Id, "ERROR", $"service '{svc}' is in both serviceNames and servicesToLeaveAlone (it will not be touched)"));
+            }
+
             // Local-machine checks. These are advisory: a service or path
             // missing on this box doesn't make the recipe wrong globally.
             if (r.ServiceNames is not null)
